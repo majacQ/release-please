@@ -12,13 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import { Update, VersionsMap, UpdateOptions } from '../update';
-import { GitHubFileContents } from '../../github';
+import {Update, VersionsMap, UpdateOptions} from '../update';
+import {GitHubFileContents} from '../../github';
 
 const INLINE_UPDATE_REGEX = /{x-version-update:([\w\-_]+):(current|released)}/;
 const BLOCK_START_REGEX = /{x-version-update-start:([\w\-_]+):(current|released)}/;
 const BLOCK_END_REGEX = /{x-version-update-end}/;
-const VERSION_REGEX = /\d+\.\d+\.\d+(-\w+)?(-SNAPSHOT)?/;
+const VERSION_REGEX = /\d+\.\d+\.\d+(-\w+(\.\d+)?)?(-SNAPSHOT)?/;
 
 export class JavaUpdate implements Update {
   path: string;
@@ -28,6 +28,7 @@ export class JavaUpdate implements Update {
   packageName: string;
   create: boolean;
   contents?: GitHubFileContents;
+
   constructor(options: UpdateOptions) {
     this.create = false;
     this.path = options.path;
@@ -43,6 +44,7 @@ export class JavaUpdate implements Update {
       this.packageName = options.packageName;
     }
   }
+
   updateContent(content: string): string {
     const newLines: string[] = [];
     let blockPackageName: string | null = null;

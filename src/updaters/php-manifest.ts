@@ -12,9 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import { checkpoint, CheckpointType } from '../util/checkpoint';
-import { Update, UpdateOptions, VersionsMap } from './update';
-import { GitHubFileContents } from '../github';
+import {checkpoint, CheckpointType} from '../util/checkpoint';
+import {Update, UpdateOptions, VersionsMap} from './update';
+import {GitHubFileContents} from '../github';
 
 interface ManifestModule {
   name: string;
@@ -38,6 +38,7 @@ export class PHPManifest implements Update {
     this.versions = options.versions;
     this.packageName = options.packageName;
   }
+
   updateContent(content: string): string {
     if (!this.versions || this.versions.size === 0) {
       checkpoint(

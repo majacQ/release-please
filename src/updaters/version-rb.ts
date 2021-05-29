@@ -12,8 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import { Update, UpdateOptions, VersionsMap } from './update';
-import { GitHubFileContents } from '../github';
+import {Update, UpdateOptions, VersionsMap} from './update';
+import {GitHubFileContents} from '../github';
 
 export class VersionRB implements Update {
   path: string;
@@ -31,6 +31,7 @@ export class VersionRB implements Update {
     this.version = options.version;
     this.packageName = options.packageName;
   }
+
   updateContent(content: string): string {
     return content.replace(
       /"[0-9]+\.[0-9]+\.[0-9](-\w+)?"/,

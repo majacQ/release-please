@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import { GitHub } from './github';
+import {PageInfo, GitHub} from './github';
 
 const CONVENTIONAL_COMMIT_REGEX = /^[\w]+(\(\w+\))?!?: /;
 
@@ -33,7 +33,13 @@ export interface Commit {
 // define what the expected GraphQL response looks like.
 
 interface CommitHistoryGraphQLResponse {
-  repository: { defaultBranchRef: { target: { history: CommitHistory } } };
+  repository: {
+    ref: {
+      target: {
+        history: CommitHistory;
+      };
+    };
+  };
 }
 
 interface CommitHistory {
@@ -45,51 +51,49 @@ interface CommitEdge {
   node: {
     message: string;
     oid: string;
-    associatedPullRequests: { edges: PREdge[] };
+    associatedPullRequests: {edges: PREdge[]};
   };
 }
 
 export interface PREdge {
   node: {
     number: number;
-    mergeCommit: { oid: string };
-    files: { edges: FileEdge[]; pageInfo: PageInfo };
-    labels: { edges: LabelEdge[] };
+    mergeCommit: {oid: string};
+    files: {edges: FileEdge[]; pageInfo: PageInfo};
+    labels: {edges: LabelEdge[]};
   };
 }
 
 interface FileEdge {
-  node: { path: string };
+  node: {path: string};
 }
 
 interface LabelEdge {
-  node: { name: string };
-}
-
-interface PageInfo {
-  endCursor: string;
-  hasNextPage: boolean;
+  node: {name: string};
 }
 
 export async function graphqlToCommits(
   github: GitHub,
   response: CommitHistoryGraphQLResponse
 ): Promise<CommitsResponse> {
-  const commitHistory: CommitHistory =
-    response.repository.defaultBranchRef.target.history;
+  const commitHistory: CommitHistory = response.repository.ref.target.history;
   const commits: CommitsResponse = {
     endCursor: commitHistory.pageInfo.endCursor,
     hasNextPage: commitHistory.pageInfo.hasNextPage,
     commits: [],
   };
+  // For merge commits, prEdge.node.mergeCommit.oid references the SHA of the
+  // commit at the top of the list of commits, vs., its own SHA. We track the
+  // SHAs observed, and if the commit references a SHA from earlier in the list
+  // of commitHistory.edges being processed, we accept it as a valid commit:
+  const observedSHAs: Set<string> = new Set();
   for (let i = 0, commitEdge: CommitEdge; i < commitHistory.edges.length; i++) {
     commitEdge = commitHistory.edges[i];
     const commit: Commit | undefined = await graphqlToCommit(
       github,
-      commitEdge
+      commitEdge,
+      observedSHAs
     );
-    // if the commit and its associated PR do not share a sha, we assume
-    // that the commit was a push to master and disregard it.
     if (commit) {
       commits.commits.push(commit);
     }
@@ -99,7 +103,8 @@ export async function graphqlToCommits(
 
 async function graphqlToCommit(
   github: GitHub,
-  commitEdge: CommitEdge
+  commitEdge: CommitEdge,
+  observedSHAs: Set<string>
 ): Promise<Commit | undefined> {
   const commit = {
     sha: commitEdge.node.oid,
@@ -116,23 +121,30 @@ async function graphqlToCommit(
 
   let prEdge: PREdge = commitEdge.node.associatedPullRequests.edges[0];
 
-  // if the commit.sha and mergeCommit.oid do not match, assume that this
-  // was a push to master and drop the commit.
-  if (commit.sha !== prEdge.node.mergeCommit.oid) {
+  if (!commit.sha) {
     return undefined;
   }
+  observedSHAs.add(commit.sha);
 
   // if, on the off chance, there are more than 100 files attached to a
   // PR, paginate in the additional files.
   while (true && prEdge.node.files) {
-    for (let i = 0, fileEdge; i < prEdge.node.files.edges.length; i++) {
+    for (let i = 0; i < prEdge.node.files.edges.length; i++) {
       commit.files.push(prEdge.node.files.edges[i].node.path);
     }
     if (prEdge.node.files.pageInfo.hasNextPage) {
-      prEdge = await github.pullRequestFiles(
-        prEdge.node.number,
-        prEdge.node.files.pageInfo.endCursor
-      );
+      try {
+        prEdge = await github.pullRequestFiles(
+          prEdge.node.number,
+          prEdge.node.files.pageInfo.endCursor
+        );
+      } catch (err) {
+        // TODO: figure out why prEdge.node.number sometimes links to
+        // data in GitHub that no longer exists, this would only cause
+        // issues for mono-repos that use commit-split.
+        console.warn(err);
+        break;
+      }
       continue;
     }
     if (prEdge.node.files.pageInfo.hasNextPage === false) break;

@@ -12,9 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import { checkpoint, CheckpointType } from '../util/checkpoint';
-import { Update, UpdateOptions, VersionsMap } from './update';
-import { GitHubFileContents } from '../github';
+import {checkpoint, CheckpointType} from '../util/checkpoint';
+import {Update, UpdateOptions, VersionsMap} from './update';
+import {GitHubFileContents} from '../github';
+import {packageJsonStringify} from '../util/package-json-stringify';
 
 export class PackageJson implements Update {
   path: string;
@@ -31,14 +32,20 @@ export class PackageJson implements Update {
     this.changelogEntry = options.changelogEntry;
     this.version = options.version;
     this.packageName = options.packageName;
+    this.contents = options.contents;
   }
+
+  updateVersion(parsed: {version: string}) {
+    parsed.version = this.version;
+  }
+
   updateContent(content: string): string {
     const parsed = JSON.parse(content);
     checkpoint(
       `updating ${this.path} from ${parsed.version} to ${this.version}`,
       CheckpointType.Success
     );
-    parsed.version = this.version;
-    return JSON.stringify(parsed, null, 2) + '\n';
+    this.updateVersion(parsed);
+    return packageJsonStringify(parsed);
   }
 }

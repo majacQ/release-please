@@ -11,7 +11,8 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-import chalk from 'chalk';
+
+import chalk = require('chalk');
 import * as figures from 'figures';
 
 export enum CheckpointType {
@@ -19,7 +20,11 @@ export enum CheckpointType {
   Failure = 'failure',
 }
 
-export function checkpoint(msg: string, type: CheckpointType) {
+export type Checkpoint = (msg: string, type: CheckpointType) => void;
+export const checkpoint: Checkpoint = function (
+  msg: string,
+  type: CheckpointType
+) {
   const prefix =
     type === CheckpointType.Success
       ? chalk.green(figures.tick)
@@ -27,4 +32,4 @@ export function checkpoint(msg: string, type: CheckpointType) {
   if (process.env.ENVIRONMENT !== 'test') {
     console.info(`${prefix} ${msg}`);
   }
-}
+};

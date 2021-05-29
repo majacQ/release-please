@@ -12,80 +12,90 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import { ReleasePR, ReleaseCandidate } from '../release-pr';
-
-import { ConventionalCommits } from '../conventional-commits';
-import { GitHubTag } from '../github';
-import { checkpoint, CheckpointType } from '../util/checkpoint';
-import { Update } from '../updaters/update';
-import { Commit } from '../graphql-to-commits';
+import {ReleasePR, ReleaseCandidate, PackageName} from '../release-pr';
+import {Update} from '../updaters/update';
 
 // Generic
-import { Changelog } from '../updaters/changelog';
+import {Changelog} from '../updaters/changelog';
 // Python specific.
-import { SetupPy } from '../updaters/python/setup-py';
+import {SetupPy} from '../updaters/python/setup-py';
+import {SetupCfg} from '../updaters/python/setup-cfg';
+import {VersionPy} from '../updaters/python/version-py';
+import {ReleasePRConstructorOptions} from '..';
+
+const CHANGELOG_SECTIONS = [
+  {type: 'feat', section: 'Features'},
+  {type: 'fix', section: 'Bug Fixes'},
+  {type: 'perf', section: 'Performance Improvements'},
+  {type: 'deps', section: 'Dependencies'},
+  {type: 'revert', section: 'Reverts'},
+  {type: 'docs', section: 'Documentation'},
+  {type: 'style', section: 'Styles', hidden: true},
+  {type: 'chore', section: 'Miscellaneous Chores', hidden: true},
+  {type: 'refactor', section: 'Code Refactoring', hidden: true},
+  {type: 'test', section: 'Tests', hidden: true},
+  {type: 'build', section: 'Build System', hidden: true},
+  {type: 'ci', section: 'Continuous Integration', hidden: true},
+];
 
 export class Python extends ReleasePR {
-  protected async _run() {
-    const latestTag: GitHubTag | undefined = await this.gh.latestTag();
-    const commits: Commit[] = await this.commits(
-      latestTag ? latestTag.sha : undefined
-    );
+  constructor(options: ReleasePRConstructorOptions) {
+    super(options);
+    this.changelogSections = options.changelogSections ?? CHANGELOG_SECTIONS;
+  }
 
-    const cc = new ConventionalCommits({
-      commits,
-      githubRepoUrl: this.repoUrl,
-      bumpMinorPreMajor: this.bumpMinorPreMajor,
-    });
-    const candidate: ReleaseCandidate = await this.coerceReleaseCandidate(
-      cc,
-      latestTag
-    );
-
-    const changelogEntry: string = await cc.generateChangelogEntry({
-      version: candidate.version,
-      currentTag: `v${candidate.version}`,
-      previousTag: candidate.previousTag,
-    });
-
-    // don't create a release candidate until user facing changes
-    // (fix, feat, BREAKING CHANGE) have been made; a CHANGELOG that's
-    // one line is a good indicator that there were no interesting commits.
-    if (this.changelogEmpty(changelogEntry)) {
-      checkpoint(
-        `no user facing commits found since ${
-          latestTag ? latestTag.sha : 'beginning of time'
-        }`,
-        CheckpointType.Failure
-      );
-      return;
-    }
-
+  protected async buildUpdates(
+    changelogEntry: string,
+    candidate: ReleaseCandidate,
+    packageName: PackageName
+  ): Promise<Update[]> {
     const updates: Update[] = [];
-
     updates.push(
       new Changelog({
-        path: 'CHANGELOG.md',
+        path: this.addPath(this.changelogPath),
         changelogEntry,
         version: candidate.version,
-        packageName: this.packageName,
+        packageName: packageName.name,
       })
     );
 
     updates.push(
-      new SetupPy({
-        path: 'setup.py',
+      new SetupCfg({
+        path: this.addPath('setup.cfg'),
         changelogEntry,
         version: candidate.version,
-        packageName: this.packageName,
+        packageName: packageName.name,
+      })
+    );
+    updates.push(
+      new SetupPy({
+        path: this.addPath('setup.py'),
+        changelogEntry,
+        version: candidate.version,
+        packageName: packageName.name,
       })
     );
 
-    await this.openPR(
-      commits[0].sha!,
-      `${changelogEntry}\n---\n`,
-      updates,
-      candidate.version
+    // There should be only one version.py, but foreach in case that is incorrect
+    const versionPyFilesSearch = this.gh.findFilesByFilename(
+      'version.py',
+      this.path
     );
+    const versionPyFiles = await versionPyFilesSearch;
+    versionPyFiles.forEach(path => {
+      updates.push(
+        new VersionPy({
+          path: this.addPath(path),
+          changelogEntry,
+          version: candidate.version,
+          packageName: packageName.name,
+        })
+      );
+    });
+    return updates;
+  }
+
+  defaultInitialVersion(): string {
+    return '0.1.0';
   }
 }

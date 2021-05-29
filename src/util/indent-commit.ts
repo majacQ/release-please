@@ -12,15 +12,22 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import { Commit } from '../graphql-to-commits';
+import {Commit} from '../graphql-to-commits';
 
 export function indentCommit(commit: Commit): string {
   const reduced: string[] = [];
+  let inList = false;
   commit.message.split(/\r?\n/).forEach((line, i) => {
     if (i !== 0) line = `  ${line}`;
-    // to show up in CHANGELOG lines must start with '*'.
-    if (/^\s*\*/.test(line) || i === 0) {
+    else reduced.push(line);
+
+    if (/^\s*\*/.test(line)) {
+      inList = true;
       reduced.push(line);
+    } else if (/^ +[\w]/.test(line) && inList) {
+      reduced[reduced.length - 1] = `${reduced[reduced.length - 1]}\n${line}`;
+    } else {
+      inList = false;
     }
   });
   return reduced.join('\n');

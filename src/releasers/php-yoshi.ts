@@ -12,23 +12,37 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import { ReleasePR, ReleaseCandidate } from '../release-pr';
+import {ReleasePR, ReleaseCandidate} from '../release-pr';
 
-import { ConventionalCommits } from '../conventional-commits';
-import { GitHubTag, GitHubFileContents } from '../github';
-import { checkpoint, CheckpointType } from '../util/checkpoint';
-import { Update, VersionsMap } from '../updaters/update';
-import { Commit } from '../graphql-to-commits';
-import { CommitSplit } from '../commit-split';
+import {ConventionalCommits} from '../conventional-commits';
+import {GitHubTag, GitHubFileContents} from '../github';
+import {checkpoint, CheckpointType} from '../util/checkpoint';
+import {Update, VersionsMap} from '../updaters/update';
+import {Commit} from '../graphql-to-commits';
+import {CommitSplit} from '../commit-split';
 import * as semver from 'semver';
 
 // Generic
-import { Changelog } from '../updaters/changelog';
+import {Changelog} from '../updaters/changelog';
 // Yoshi PHP Monorepo
-import { PHPClientVersion } from '../updaters/php-client-version';
-import { PHPManifest } from '../updaters/php-manifest';
-import { RootComposer } from '../updaters/root-composer';
-import { Version } from '../updaters/version';
+import {PHPClientVersion} from '../updaters/php-client-version';
+import {PHPManifest} from '../updaters/php-manifest';
+import {RootComposer} from '../updaters/root-composer';
+import {Version} from '../updaters/version';
+
+const CHANGELOG_SECTIONS = [
+  {type: 'feat', section: 'Features'},
+  {type: 'fix', section: 'Bug Fixes'},
+  {type: 'perf', section: 'Performance Improvements'},
+  {type: 'revert', section: 'Reverts'},
+  {type: 'docs', section: 'Documentation'},
+  {type: 'chore', section: 'Miscellaneous Chores'},
+  {type: 'style', section: 'Styles', hidden: true},
+  {type: 'refactor', section: 'Code Refactoring', hidden: true},
+  {type: 'test', section: 'Tests', hidden: true},
+  {type: 'build', section: 'Build System', hidden: true},
+  {type: 'ci', section: 'Continuous Integration', hidden: true},
+];
 
 interface PHPYoshiBulkUpdate {
   changelogEntry: string;
@@ -36,18 +50,20 @@ interface PHPYoshiBulkUpdate {
 }
 
 export class PHPYoshi extends ReleasePR {
-  protected async _run() {
-    const latestTag: GitHubTag | undefined = await this.gh.latestTag();
-    const commits: Commit[] = await this.commits(
-      latestTag ? latestTag.sha : undefined
-    );
+  protected async _run(): Promise<number | undefined> {
+    const latestTag: GitHubTag | undefined = await this.latestTag();
+    const commits: Commit[] = await this.commits({
+      sha: latestTag ? latestTag.sha : undefined,
+    });
 
     // we create an instance of conventional CHANGELOG for bumping the
     // top-level tag version we maintain on the mono-repo itself.
     const ccb = new ConventionalCommits({
       commits,
-      githubRepoUrl: this.repoUrl,
+      owner: this.gh.owner,
+      repository: this.gh.repo,
       bumpMinorPreMajor: true,
+      changelogSections: CHANGELOG_SECTIONS,
     });
     const candidate: ReleaseCandidate = await this.coerceReleaseCandidate(
       ccb,
@@ -67,6 +83,7 @@ export class PHPYoshi extends ReleasePR {
     );
     changelogEntry = bulkUpdate.changelogEntry;
 
+    const packageName = await this.getPackageName();
     // update the aggregate package information in the root
     // composer.json and manifest.json.
     updates.push(
@@ -75,7 +92,7 @@ export class PHPYoshi extends ReleasePR {
         changelogEntry,
         version: candidate.version,
         versions: bulkUpdate.versionUpdates,
-        packageName: this.packageName,
+        packageName: packageName.name,
       })
     );
 
@@ -85,16 +102,16 @@ export class PHPYoshi extends ReleasePR {
         changelogEntry,
         version: candidate.version,
         versions: bulkUpdate.versionUpdates,
-        packageName: this.packageName,
+        packageName: packageName.name,
       })
     );
 
     updates.push(
       new Changelog({
-        path: 'CHANGELOG.md',
+        path: this.changelogPath,
         changelogEntry,
         version: candidate.version,
-        packageName: this.packageName,
+        packageName: packageName.name,
       })
     );
 
@@ -104,17 +121,18 @@ export class PHPYoshi extends ReleasePR {
           path,
           changelogEntry,
           version: candidate.version,
-          packageName: this.packageName,
+          packageName: packageName.name,
         })
       );
     });
 
-    await this.openPR(
-      commits[0].sha!,
+    return await this.openPR({
+      sha: commits[0].sha!,
       changelogEntry,
       updates,
-      candidate.version
-    );
+      version: candidate.version,
+      includePackageName: this.monorepoTags,
+    });
   }
 
   private async releaseAllPHPLibraries(
@@ -123,7 +141,7 @@ export class PHPYoshi extends ReleasePR {
     changelogEntry: string
   ): Promise<PHPYoshiBulkUpdate> {
     const cs = new CommitSplit();
-    const commitLookup: { [key: string]: Commit[] } = cs.split(commits);
+    const commitLookup: {[key: string]: Commit[]} = cs.split(commits);
     const pkgKeys: string[] = Object.keys(commitLookup).sort();
     // map of library names that need to be updated in the top level
     // composer.json and manifest.json.
@@ -135,15 +153,17 @@ export class PHPYoshi extends ReleasePR {
       const pkgKey: string = pkgKeys[i];
       const cc = new ConventionalCommits({
         commits: commitLookup[pkgKey],
-        githubRepoUrl: this.repoUrl,
+        owner: this.gh.owner,
+        repository: this.gh.repo,
         bumpMinorPreMajor: this.bumpMinorPreMajor,
+        changelogSections: CHANGELOG_SECTIONS,
       });
 
       // some packages in the mono-repo might have only had chores,
       // build updates, etc., applied.
       if (
         !this.changelogEmpty(
-          await cc.generateChangelogEntry({ version: '0.0.0' })
+          await cc.generateChangelogEntry({version: '0.0.0'})
         )
       ) {
         try {
@@ -172,15 +192,16 @@ export class PHPYoshi extends ReleasePR {
           changelogEntry = updatePHPChangelogEntry(
             `${meta.name} ${candidate}`,
             changelogEntry,
-            await cc.generateChangelogEntry({ version: candidate })
+            await cc.generateChangelogEntry({version: candidate})
           );
 
+          const packageName = await this.getPackageName();
           updates.push(
             new Version({
               path: `${pkgKey}/VERSION`,
               changelogEntry,
               version: candidate,
-              packageName: this.packageName,
+              packageName: packageName.name,
               contents,
             })
           );
@@ -197,7 +218,7 @@ export class PHPYoshi extends ReleasePR {
                 path: `${pkgKey}/${meta.extra.component.entry}`,
                 changelogEntry,
                 version: candidate,
-                packageName: this.packageName,
+                packageName: packageName.name,
               })
             );
           }
@@ -213,7 +234,7 @@ export class PHPYoshi extends ReleasePR {
       }
     }
 
-    return { changelogEntry, versionUpdates };
+    return {changelogEntry, versionUpdates};
   }
 }
 

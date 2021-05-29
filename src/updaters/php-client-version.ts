@@ -12,10 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import { GitHubFileContents } from '../github';
+import {GitHubFileContents} from '../github';
 
-import { checkpoint, CheckpointType } from '../util/checkpoint';
-import { Update, UpdateOptions, VersionsMap } from './update';
+import {Update, UpdateOptions, VersionsMap} from './update';
 
 export class PHPClientVersion implements Update {
   path: string;
@@ -34,6 +33,7 @@ export class PHPClientVersion implements Update {
     this.packageName = options.packageName;
     this.contents = options.contents;
   }
+
   updateContent(content: string): string {
     return content.replace(
       /const VERSION = '[0-9]+\.[0-9]+\.[0-9]+'/,

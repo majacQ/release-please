@@ -12,12 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import { readFileSync } from 'fs';
-import { basename, resolve } from 'path';
+import {readFileSync} from 'fs';
+import {resolve} from 'path';
 import * as snapshot from 'snap-shot-it';
-
-import { PackageJson } from '../../src/updaters/package-json';
-import { UpdateOptions } from '../../src/updaters/update';
+import {describe, it} from 'mocha';
+import {PackageJson} from '../../src/updaters/package-json';
 
 const fixturesPath = './test/updaters/fixtures';
 
@@ -29,7 +28,7 @@ describe('PackageJson', () => {
         'utf8'
       );
       const packageJson = new PackageJson({
-        path: 'packae.json',
+        path: 'package.json',
         changelogEntry: '',
         version: '14.0.0',
         packageName: '@google-cloud/foo',

@@ -12,8 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import { VersionsMap } from '../update';
-import { JavaUpdate } from './java_update';
+import {VersionsMap} from '../update';
+import {JavaUpdate} from './java_update';
 
 export class VersionsManifest extends JavaUpdate {
   updateContent(content: string): string {
@@ -33,20 +33,14 @@ export class VersionsManifest extends JavaUpdate {
       if (version.includes('SNAPSHOT')) {
         newLines.push(
           line.replace(
-            new RegExp(
-              `${packageName}:(.*):[0-9]+\\.[0-9]+\\.[0-9]+(-\\w+)?(-SNAPSHOT)?`,
-              'g'
-            ),
+            new RegExp(`${packageName}:(.*):(.*)`, 'g'),
             `${packageName}:$1:${version}`
           )
         );
       } else {
         newLines.push(
           line.replace(
-            new RegExp(
-              `${packageName}:[0-9]+\\.[0-9]+\\.[0-9]+(-\\w+)?(-SNAPSHOT)?:[0-9]+\\.[0-9]+\\.[0-9]+(-\\w+)?(-SNAPSHOT)?`,
-              'g'
-            ),
+            new RegExp(`${packageName}:(.*):(.*)`, 'g'),
             `${packageName}:${version}:${version}`
           )
         );
@@ -58,7 +52,7 @@ export class VersionsManifest extends JavaUpdate {
   static parseVersions(content: string): VersionsMap {
     const versions = new Map<string, string>();
     content.split(/\r?\n/).forEach(line => {
-      const match = line.match(/^([\w\-_]+):(.+):(.+)/);
+      const match = line.match(/^([\w\-_]+):([^:]+):([^:]+)/);
       if (match) {
         versions.set(match[1], match[2]);
       }
