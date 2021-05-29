@@ -53,12 +53,86 @@ exports['ChangelogUpdater updateContent inserts content at appropriate location 
 
 `
 
-exports['ChangelogUpdater updateContent populates a new CHANGELOG if none exists 1'] = `
+exports['ChangelogUpdater updateContent inserts content at appropriate location if CHANGELOG exists, and last release was a patch 1'] = `
 # Changelog
 
 [npm history][1]
 
-[1]: https://www.npmjs.com/package/foo-package?activeTab=versions
+[1]: https://www.npmjs.com/package/@google-cloud/os-login?activeTab=versions
+
+## 2.0.0
+
+* added a new foo to bar.
+
+### [0.3.3](https://www.github.com/googleapis/nodejs-os-login/compare/v0.3.2...v0.3.3) (2019-04-30)
+
+
+### Bug Fixes
+
+* include 'x-goog-request-params' header in requests ([#167](https://www.github.com/googleapis/nodejs-os-login/issues/167)) ([074051d](https://www.github.com/googleapis/nodejs-os-login/commit/074051d))
+
+## v0.3.2
+
+03-18-2019 13:47 PDT
+
+`
+
+exports['ChangelogUpdater updateContent inserts content at appropriate location in yoshi-ruby style CHANGELOG 1'] = `
+# Release History
+
+## 0.7.0
+
+* added a new foo to bar.
+
+### 0.5.0 / 2019-07-08
+
+* Support overriding service host and port
+
+### 0.4.2 / 2019-06-11
+
+* Add VERSION constant
+
+### 0.4.1 / 2019-04-29
+
+* Add AUTHENTICATION.md guide.
+* Extract gRPC header values from request.
+
+### 0.4.0 / 2019-03-11
+
+* Add v1beta1 API version
+
+### 0.3.0 / 2018-12-10
+
+* Add support for Regional Clusters.
+  * Client methods deprecate many positional arguments in
+    favor of name/parent named argument.
+  * Maintains backwards compatibility.
+
+### 0.2.2 / 2018-09-20
+
+* Update documentation.
+  * Change documentation URL to googleapis GitHub org.
+
+### 0.2.1 / 2018-09-10
+
+* Update documentation.
+
+### 0.2.0 / 2018-08-21
+
+* Move Credentials location:
+  * Add Google::Cloud::Container::V1::Credentials
+  * Remove Google::Cloud::Container::Credentials
+* Update dependencies.
+* Update documentation.
+
+### 0.1.0 / 2017-12-26
+
+* Initial release
+
+`
+
+exports['ChangelogUpdater updateContent populates a new CHANGELOG if none exists 1'] = `
+# Changelog
 
 ## 2.0.0
 

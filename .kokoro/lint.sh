@@ -14,18 +14,20 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-set -xeo pipefail
+set -eo pipefail
 
-export NPM_CONFIG_PREFIX=/home/node/.npm-global
+export NPM_CONFIG_PREFIX=${HOME}/.npm-global
 
 cd $(dirname $0)/..
 
 npm install
 
 # Install and link samples
-cd samples/
-npm link ../
-npm install
-cd ..
+if [ -f samples/package.json ]; then
+  cd samples/
+  npm link ../
+  npm install
+  cd ..
+fi
 
 npm run lint

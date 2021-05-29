@@ -17,7 +17,13 @@
 cd /d %~dp0
 cd ..
 
-call npm install -g npm@latest || goto :error
+@rem npm path is not currently set in our image, we should fix this next time
+@rem we upgrade Node.js in the image:
+SET PATH=%PATH%;/cygdrive/c/Program Files/nodejs/npm
+
+call nvm use v12.14.1
+call which node
+
 call npm install || goto :error
 call npm run test || goto :error
 
