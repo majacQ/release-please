@@ -34,11 +34,14 @@ accept your pull requests.
 1.  Ensure that your code adheres to the existing style in the code to which
     you are contributing.
 1.  Ensure that your code has an appropriate set of tests which all pass.
+1.  Title your pull request following [Conventional Commits](https://www.conventionalcommits.org/) styling.
 1.  Submit a pull request.
 
-## Running the tests
+### Before you begin
 
-1.  [Prepare your environment for Node.js setup][setup].
+1.  [Install Node.js LTS][node].
+
+## Running the tests
 
 1.  Install dependencies:
 
@@ -52,4 +55,4 @@ accept your pull requests.
 
         npm run fix
 
-[setup]: https://cloud.google.com/nodejs/docs/setup
+[node]: https://nodejs.org/en/

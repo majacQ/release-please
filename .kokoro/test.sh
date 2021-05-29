@@ -14,13 +14,24 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-set -xeo pipefail
+set -eo pipefail
 
-export NPM_CONFIG_PREFIX=/home/node/.npm-global
+export NPM_CONFIG_PREFIX=${HOME}/.npm-global
 
 cd $(dirname $0)/..
 
 npm install
+# If tests are running against master, configure flakybot
+# to open issues on failures:
+if [[ $KOKORO_BUILD_ARTIFACTS_SUBDIR = *"continuous"* ]] || [[ $KOKORO_BUILD_ARTIFACTS_SUBDIR = *"nightly"* ]]; then
+  export MOCHA_REPORTER_OUTPUT=test_output_sponge_log.xml
+  export MOCHA_REPORTER=xunit
+  cleanup() {
+    chmod +x $KOKORO_GFILE_DIR/linux_amd64/flakybot
+    $KOKORO_GFILE_DIR/linux_amd64/flakybot
+  }
+  trap cleanup EXIT HUP
+fi
 npm test
 
 # codecov combines coverage across integration and unit tests. Include
@@ -34,12 +45,4 @@ if npx check-node-version@3.3.0 --silent --node $COVERAGE_NODE; then
   bash $KOKORO_GFILE_DIR/codecov.sh
 else
   echo "coverage is only reported for Node $COVERAGE_NODE"
-fi
-
-# if the GITHUB_TOKEN is set, we kick off a task to update the release-PR.
-GITHUB_TOKEN=$(cat $KOKORO_KEYSTORE_DIR/73713_yoshi-automation-github-key) || true
-if [ "$GITHUB_TOKEN" ]; then
-  npx release-please release-pr --token=$GITHUB_TOKEN \
-    --repo-url=googleapis/release-please \
-    --package-name=release-please
 fi

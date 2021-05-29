@@ -14,13 +14,17 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-set -xeo pipefail
+set -eo pipefail
 
 export NPM_CONFIG_PREFIX=/home/node/.npm-global
 
 # Setup service account credentials.
 export GOOGLE_APPLICATION_CREDENTIALS=${KOKORO_GFILE_DIR}/service-account.json
 export GCLOUD_PROJECT=long-door-651
+# release-please github credentials.
+export TOKEN_PATH=${KOKORO_KEYSTORE_DIR}/73713_github-magic-proxy-token-release-please
+export API_URL_PATH=${KOKORO_KEYSTORE_DIR}/73713_github-magic-proxy-url-release-please
+export PROXY_KEY_PATH=${KOKORO_KEYSTORE_DIR}/73713_github-magic-proxy-key-release-please
 
 cd $(dirname $0)/..
 
