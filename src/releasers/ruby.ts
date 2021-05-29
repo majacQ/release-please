@@ -12,7 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import {ReleasePROptions, ReleasePR, ReleaseCandidate} from '../release-pr';
+import {ReleasePRConstructorOptions} from '..';
+import {ReleasePR, ReleaseCandidate} from '../release-pr';
 
 import {ConventionalCommits} from '../conventional-commits';
 import {GitHubTag} from '../github';
@@ -27,28 +28,29 @@ import {Changelog} from '../updaters/changelog';
 // Ruby
 import {VersionRB} from '../updaters/version-rb';
 
-export interface RubyReleasePROptions extends ReleasePROptions {
-  // should be full path to version.rb file.
-  versionFile: string;
-}
-
 export class Ruby extends ReleasePR {
-  static releaserName = 'ruby';
   versionFile: string;
-  constructor(options: RubyReleasePROptions) {
-    super(options as ReleasePROptions);
-    this.versionFile = options.versionFile;
+  constructor(options: ReleasePRConstructorOptions) {
+    super(options);
+    this.versionFile = options.versionFile ?? '';
   }
-  protected async _run() {
-    const latestTag: GitHubTag | undefined = await this.gh.latestTag();
-    const commits: Commit[] = await this.commits(
-      latestTag ? latestTag.sha : undefined
+  protected async _run(): Promise<number | undefined> {
+    const packageName = await this.getPackageName();
+    const latestTag: GitHubTag | undefined = await this.latestTag(
+      this.monorepoTags ? `${packageName.getComponent()}-` : undefined,
+      false
     );
+    const commits: Commit[] = await this.commits({
+      sha: latestTag ? latestTag.sha : undefined,
+      path: this.path,
+    });
 
     const cc = new ConventionalCommits({
       commits: postProcessCommits(commits),
-      githubRepoUrl: this.repoUrl,
+      owner: this.gh.owner,
+      repository: this.gh.repo,
       bumpMinorPreMajor: this.bumpMinorPreMajor,
+      changelogSections: this.changelogSections,
     });
     const candidate: ReleaseCandidate = await this.coerceReleaseCandidate(
       cc,
@@ -57,8 +59,10 @@ export class Ruby extends ReleasePR {
 
     const changelogEntry: string = await cc.generateChangelogEntry({
       version: candidate.version,
-      currentTag: `v${candidate.version}`,
-      previousTag: candidate.previousTag,
+      currentTag: await this.normalizeTagName(candidate.version),
+      previousTag: candidate.previousTag
+        ? await this.normalizeTagName(candidate.previousTag)
+        : undefined,
     });
 
     // don't create a release candidate until user facing changes
@@ -71,35 +75,40 @@ export class Ruby extends ReleasePR {
         }`,
         CheckpointType.Failure
       );
-      return;
+      return undefined;
     }
 
     const updates: Update[] = [];
 
     updates.push(
       new Changelog({
-        path: 'CHANGELOG.md',
+        path: this.addPath(this.changelogPath),
         changelogEntry,
         version: candidate.version,
-        packageName: this.packageName,
+        packageName: packageName.name,
       })
     );
 
     updates.push(
       new VersionRB({
-        path: this.versionFile,
+        path: this.addPath(this.versionFile),
         changelogEntry,
         version: candidate.version,
-        packageName: this.packageName,
+        packageName: packageName.name,
       })
     );
 
-    await this.openPR(
-      commits[0].sha!,
-      `${changelogEntry}\n---\n`,
+    return await this.openPR({
+      sha: commits[0].sha!,
+      changelogEntry: `${changelogEntry}\n---\n`,
       updates,
-      candidate.version
-    );
+      version: candidate.version,
+      includePackageName: this.monorepoTags,
+    });
+  }
+
+  tagSeparator(): string {
+    return '/';
   }
 }
 

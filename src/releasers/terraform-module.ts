@@ -24,19 +24,25 @@ import {Commit} from '../graphql-to-commits';
 import {Changelog} from '../updaters/changelog';
 // Terraform specific.
 import {ReadMe} from '../updaters/terraform/readme';
+import {ModuleVersion} from '../updaters/terraform/module-version';
 
 export class TerraformModule extends ReleasePR {
-  static releaserName = 'terraform-module';
-  protected async _run() {
-    const latestTag: GitHubTag | undefined = await this.gh.latestTag();
-    const commits: Commit[] = await this.commits(
-      latestTag ? latestTag.sha : undefined
+  protected async _run(): Promise<number | undefined> {
+    const packageName = await this.getPackageName();
+    const latestTag: GitHubTag | undefined = await this.latestTag(
+      this.monorepoTags ? `${packageName.getComponent()}-` : undefined
     );
+    const commits: Commit[] = await this.commits({
+      sha: latestTag ? latestTag.sha : undefined,
+      path: this.path,
+    });
 
     const cc = new ConventionalCommits({
       commits,
-      githubRepoUrl: this.repoUrl,
+      owner: this.gh.owner,
+      repository: this.gh.repo,
       bumpMinorPreMajor: this.bumpMinorPreMajor,
+      changelogSections: this.changelogSections,
     });
     const candidate: ReleaseCandidate = await this.coerceReleaseCandidate(
       cc,
@@ -59,38 +65,63 @@ export class TerraformModule extends ReleasePR {
         }`,
         CheckpointType.Failure
       );
-      return;
+      return undefined;
     }
 
     const updates: Update[] = [];
 
     updates.push(
       new Changelog({
-        path: 'CHANGELOG.md',
+        path: this.addPath(this.changelogPath),
         changelogEntry,
         version: candidate.version,
-        packageName: this.packageName,
+        packageName: packageName.name,
       })
     );
 
-    updates.push(
-      new ReadMe({
-        path: 'README.md',
-        changelogEntry,
-        version: candidate.version,
-        packageName: this.packageName,
-      })
-    );
+    // Update version in README to current candidate version.
+    // A module may have submodules, so find all submodules.
+    const readmeFiles = await this.gh.findFilesByFilename('readme.md');
+    readmeFiles.forEach(path => {
+      updates.push(
+        new ReadMe({
+          path: this.addPath(path),
+          changelogEntry,
+          version: candidate.version,
+          packageName: packageName.name,
+        })
+      );
+    });
 
-    await this.openPR(
-      commits[0].sha!,
-      `${changelogEntry}\n---\n`,
+    // Update versions.tf to current candidate version.
+    // A module may have submodules, so find all versions.tfand versions.tf.tmpl to update.
+    const versionFiles = await Promise.all([
+      this.gh.findFilesByFilename('versions.tf'),
+      this.gh.findFilesByFilename('versions.tf.tmpl'),
+    ]).then(([v, vt]) => {
+      return v.concat(vt);
+    });
+    versionFiles.forEach(path => {
+      updates.push(
+        new ModuleVersion({
+          path: this.addPath(path),
+          changelogEntry,
+          version: candidate.version,
+          packageName: packageName.name,
+        })
+      );
+    });
+
+    return await this.openPR({
+      sha: commits[0].sha!,
+      changelogEntry: `${changelogEntry}\n---\n`,
       updates,
-      candidate.version
-    );
+      version: candidate.version,
+      includePackageName: this.monorepoTags,
+    });
   }
 
-  protected defaultInitialVersion(): string {
+  defaultInitialVersion(): string {
     return '0.1.0';
   }
 }

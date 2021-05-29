@@ -12,408 +12,598 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import {describe, it, before} from 'mocha';
+import {describe, it, afterEach, beforeEach} from 'mocha';
 import * as nock from 'nock';
 nock.disableNetConnect();
 
 import {JavaYoshi} from '../../src/releasers/java-yoshi';
+import * as suggester from 'code-suggester';
+import * as sinon from 'sinon';
+import {GitHubFileContents, GitHub} from '../../src/github';
+import {expect} from 'chai';
+import {buildGitHubFileContent} from './utils';
+import {buildMockCommit, stubSuggesterWithSnapshot} from '../helpers';
 import {readFileSync} from 'fs';
 import {resolve} from 'path';
-import * as snapshot from 'snap-shot-it';
+import {ReleasePR} from '../../src/release-pr';
 
-const fixturesPath = './test/releasers/fixtures/java-yoshi';
+const sandbox = sinon.createSandbox();
 
-interface MochaThis {
-  [skip: string]: Function;
-}
-function requireNode10(this: MochaThis) {
-  const match = process.version.match(/v([0-9]+)/);
-  if (match) {
-    if (Number(match[1]) < 10) this.skip();
-  }
+function buildFileContent(fixture: string): GitHubFileContents {
+  return buildGitHubFileContent(
+    './test/releasers/fixtures/java-yoshi',
+    fixture
+  );
 }
 
 describe('JavaYoshi', () => {
-  before(requireNode10);
-  it('creates a release PR', async () => {
-    const versionsContent = readFileSync(
-      resolve(fixturesPath, 'versions.txt'),
-      'utf8'
-    );
-    const readmeContent = readFileSync(
-      resolve(fixturesPath, 'README.md'),
-      'utf8'
-    );
-    const pomContents = readFileSync(resolve(fixturesPath, 'pom.xml'), 'utf8');
-    const googleUtilsContent = readFileSync(
-      resolve(fixturesPath, 'GoogleUtils.java'),
-      'utf8'
-    ).replace(/\r\n/g, '\n');
-    const graphql = JSON.parse(
-      readFileSync(resolve(fixturesPath, 'commits-yoshi-java.json'), 'utf8')
-    );
-    const req = nock('https://api.github.com')
-      .get('/repos/googleapis/java-trace/pulls?state=closed&per_page=100')
-      .reply(200, undefined)
-      .get('/repos/googleapis/java-trace/contents/versions.txt')
-      .reply(200, {
-        content: Buffer.from(versionsContent, 'utf8').toString('base64'),
-        sha: 'abc123',
-      })
-      // fetch semver tags, this will be used to determine
-      // the delta since the last release.
-      .get('/repos/googleapis/java-trace/tags?per_page=100')
-      .reply(200, [
-        {
-          name: 'v0.20.3',
-          commit: {
-            sha: 'da6e52d956c1e35d19e75e0f2fdba439739ba364',
-          },
-        },
-      ])
-      .post('/graphql')
-      .reply(200, {
-        data: graphql,
-      })
-      // finding pom.xml files
-      .get('/search/code?q=filename%3Apom.xml+repo%3Agoogleapis%2Fjava-trace')
-      .reply(200, {
-        total_count: 1,
-        items: [{name: 'pom.xml', path: 'pom.xml'}],
-      })
-      // finding build.gradle files
-      .get(
-        '/search/code?q=filename%3Abuild.gradle+repo%3Agoogleapis%2Fjava-trace'
-      )
-      .reply(200, {
-        total_count: 0,
-        items: [],
-      })
-      // finding dependencies.properties files
-      .get(
-        '/search/code?q=filename%3Adependencies.properties+repo%3Agoogleapis%2Fjava-trace'
-      )
-      .reply(200, {
-        total_count: 0,
-        items: [],
-      })
-      // getting the latest tag
-      .get('/repos/googleapis/java-trace/git/refs?per_page=100')
-      .reply(200, [{ref: 'refs/tags/v0.20.3'}])
-      // creating a new branch
-      .post('/repos/googleapis/java-trace/git/refs')
-      .reply(200)
-      // check for CHANGELOG
-      .get(
-        '/repos/googleapis/java-trace/contents/CHANGELOG.md?ref=refs%2Fheads%2Frelease-v0.20.4'
-      )
-      .reply(404)
-      .put(
-        '/repos/googleapis/java-trace/contents/CHANGELOG.md',
-        (req: {[key: string]: string}) => {
-          snapshot('CHANGELOG-message', req.message);
-          snapshot(
-            'CHANGELOG',
-            Buffer.from(req.content, 'base64')
-              .toString('utf8')
-              .replace(/\([0-9]{4}-[0-9]{2}-[0-9]{2}\)/g, '')
-          );
-          return true;
-        }
-      )
-      .reply(201)
-      // update README.md
-      .get(
-        '/repos/googleapis/java-trace/contents/README.md?ref=refs%2Fheads%2Frelease-v0.20.4'
-      )
-      .reply(200, {
-        content: Buffer.from(readmeContent, 'utf8').toString('base64'),
-      })
-      .put(
-        '/repos/googleapis/java-trace/contents/README.md',
-        (req: {[key: string]: string}) => {
-          snapshot('README-message', req.message);
-          snapshot(
-            'README',
-            Buffer.from(req.content, 'base64').toString('utf8')
-          );
-          return true;
-        }
-      )
-      .reply(200)
-      // update versions.txt
-      .get(
-        '/repos/googleapis/java-trace/contents/versions.txt?ref=refs%2Fheads%2Frelease-v0.20.4'
-      )
-      .reply(200, {
-        content: Buffer.from(versionsContent, 'utf8').toString('base64'),
-        sha: 'abc123',
-      })
-      .put(
-        '/repos/googleapis/java-trace/contents/versions.txt',
-        (req: {[key: string]: string}) => {
-          snapshot('versions-message', req.message);
-          snapshot(
-            'versions',
-            Buffer.from(req.content, 'base64').toString('utf8')
-          );
-          return true;
-        }
-      )
-      .reply(200)
-      // update pom.xml
-      .get(
-        '/repos/googleapis/java-trace/contents/pom.xml?ref=refs%2Fheads%2Frelease-v0.20.4'
-      )
-      .reply(200, {
-        content: Buffer.from(pomContents, 'utf8').toString('base64'),
-        sha: 'abc123',
-      })
-      .put(
-        '/repos/googleapis/java-trace/contents/pom.xml',
-        (req: {[key: string]: string}) => {
-          snapshot('pom-message', req.message);
-          snapshot('pom', Buffer.from(req.content, 'base64').toString('utf8'));
-          return true;
-        }
-      )
-      .reply(200)
-      // Update GoogleUtils.java
-      .get(
-        '/repos/googleapis/java-trace/contents/google-api-client/src/main/java/com/google/api/client/googleapis/GoogleUtils.java?ref=refs%2Fheads%2Frelease-v0.20.4'
-      )
-      .reply(200, {
-        content: Buffer.from(googleUtilsContent, 'utf8').toString('base64'),
-        sha: 'abc123',
-      })
-      .put(
-        '/repos/googleapis/java-trace/contents/google-api-client/src/main/java/com/google/api/client/googleapis/GoogleUtils.java',
-        (req: {[key: string]: string}) => {
-          snapshot('GoogleUtils-message', req.message);
-          snapshot(
-            'GoogleUtils',
-            Buffer.from(req.content, 'base64').toString('utf8')
-          );
-          return true;
-        }
-      )
-      .reply(200)
-      // check for default branch
-      .get('/repos/googleapis/java-trace')
-      // eslint-disable-next-line @typescript-eslint/no-var-requires
-      .reply(200, require('../../../test/fixtures/repo-get-1.json'))
-      // create release
-      .post(
-        '/repos/googleapis/java-trace/pulls',
-        (req: {[key: string]: string}) => {
-          req.body = req.body.replace(/\([0-9]{4}-[0-9]{2}-[0-9]{2}\)/g, '');
-          snapshot('PR body', req);
-          return true;
-        }
-      )
-      .reply(200, {number: 1})
-      .post(
-        '/repos/googleapis/java-trace/issues/1/labels',
-        (req: {[key: string]: string}) => {
-          snapshot('labels', req);
-          return true;
-        }
-      )
-      .reply(200, {})
-      // this step tries to close any existing PRs; just return an empty list.
-      .get('/repos/googleapis/java-trace/pulls?state=open&per_page=100')
-      .reply(200, []);
-    const releasePR = new JavaYoshi({
-      repoUrl: 'googleapis/java-trace',
-      releaseType: 'java-yoshi',
-      // not actually used by this type of repo.
-      packageName: 'java-trace',
-      apiUrl: 'https://api.github.com',
-    });
-    await releasePR.run();
-    req.done();
+  afterEach(() => {
+    sandbox.restore();
   });
-  it('creates a snapshot PR', async () => {
-    const versionsContent = readFileSync(
-      resolve(fixturesPath, 'released-versions.txt'),
-      'utf8'
-    );
-    const pomContents = readFileSync(resolve(fixturesPath, 'pom.xml'), 'utf8');
-    const graphql = JSON.parse(
-      readFileSync(resolve(fixturesPath, 'commits-yoshi-java.json'), 'utf8')
-    );
-    const req = nock('https://api.github.com')
-      .get('/repos/googleapis/java-trace/pulls?state=closed&per_page=100')
-      .reply(200, undefined)
-      .get('/repos/googleapis/java-trace/contents/versions.txt')
-      .reply(200, {
-        content: Buffer.from(versionsContent, 'utf8').toString('base64'),
-        sha: 'abc123',
-      })
-      // getting the most recent commit:
-      .post('/graphql')
-      .reply(200, {
-        data: graphql,
-      })
-      // fetch semver tags, this will be used to determine
-      // the delta since the last release.
-      .get('/repos/googleapis/java-trace/tags?per_page=100')
-      .reply(200, [
-        {
-          name: 'v0.20.3',
-          commit: {
-            sha: 'da6e52d956c1e35d19e75e0f2fdba439739ba364',
-          },
-        },
-      ])
-      // finding pom.xml files
-      .get('/search/code?q=filename%3Apom.xml+repo%3Agoogleapis%2Fjava-trace')
-      .reply(200, {
-        total_count: 1,
-        items: [{name: 'pom.xml', path: 'pom.xml'}],
-      })
-      // finding build.gradle files
-      .get(
-        '/search/code?q=filename%3Abuild.gradle+repo%3Agoogleapis%2Fjava-trace'
-      )
-      .reply(200, {
-        total_count: 0,
-        items: [],
-      })
-      // finding dependencies.properties files
-      .get(
-        '/search/code?q=filename%3Adependencies.properties+repo%3Agoogleapis%2Fjava-trace'
-      )
-      .reply(200, {
-        total_count: 0,
-        items: [],
-      })
-      // getting the latest tag
-      .get('/repos/googleapis/java-trace/git/refs?per_page=100')
-      .reply(200, [{ref: 'refs/tags/v0.20.3'}])
-      // creating a new branch
-      .post('/repos/googleapis/java-trace/git/refs')
-      .reply(200)
-      // update versions.txt
-      .get(
-        '/repos/googleapis/java-trace/contents/versions.txt?ref=refs%2Fheads%2Frelease-v0.20.4-SNAPSHOT'
-      )
-      .reply(200, {
-        content: Buffer.from(versionsContent, 'utf8').toString('base64'),
-        sha: 'abc123',
-      })
-      .put(
-        '/repos/googleapis/java-trace/contents/versions.txt',
-        (req: {[key: string]: string}) => {
-          snapshot(
-            'versions-snapshot',
-            Buffer.from(req.content, 'base64').toString('utf8')
-          );
-          return true;
-        }
-      )
-      .reply(200)
-      // update pom.xml
-      .get(
-        '/repos/googleapis/java-trace/contents/pom.xml?ref=refs%2Fheads%2Frelease-v0.20.4-SNAPSHOT'
-      )
-      .reply(200, {
-        content: Buffer.from(pomContents, 'utf8').toString('base64'),
-        sha: 'abc123',
-      })
-      .put(
-        '/repos/googleapis/java-trace/contents/pom.xml',
-        (req: {[key: string]: string}) => {
-          snapshot(
-            'pom-snapshot',
-            Buffer.from(req.content, 'base64').toString('utf8')
-          );
-          return true;
-        }
-      )
-      .reply(200)
-      // check for default branch
-      .get('/repos/googleapis/java-trace')
-      // eslint-disable-next-line @typescript-eslint/no-var-requires
-      .reply(200, require('../../../test/fixtures/repo-get-2.json'))
-      // create release
-      .post(
-        '/repos/googleapis/java-trace/pulls',
-        (req: {[key: string]: string}) => {
-          req.body = req.body.replace(/\([0-9]{4}-[0-9]{2}-[0-9]{2}\)/g, '');
-          snapshot('PR body-snapshot', req);
-          return true;
-        }
-      )
-      .reply(200, {number: 1})
-      .post(
-        '/repos/googleapis/java-trace/issues/1/labels',
-        (req: {[key: string]: string}) => {
-          snapshot('labels-snapshot', req);
-          return true;
-        }
-      )
-      .reply(200, {})
-      // this step tries to close any existing PRs; just return an empty list.
-      .get('/repos/googleapis/java-trace/pulls?state=open&per_page=100')
-      .reply(200, []);
+  it('creates a release PR', async function () {
     const releasePR = new JavaYoshi({
-      repoUrl: 'googleapis/java-trace',
-      releaseType: 'java-yoshi',
-      // not actually used by this type of repo.
+      github: new GitHub({owner: 'googleapis', repo: 'java-trace'}),
       packageName: 'java-trace',
-      apiUrl: 'https://api.github.com',
+    });
+
+    sandbox
+      .stub(releasePR.gh, 'getRepositoryDefaultBranch')
+      .returns(Promise.resolve('master'));
+
+    // No open release PRs, so create a new release PR
+    sandbox
+      .stub(releasePR.gh, 'findOpenReleasePRs')
+      .returns(Promise.resolve([]));
+
+    // Indicates that there are no PRs currently waiting to be released:
+    sandbox
+      .stub(releasePR.gh, 'findMergedReleasePR')
+      .returns(Promise.resolve(undefined));
+
+    sandbox.stub(releasePR, 'latestTag').returns(
+      Promise.resolve({
+        name: 'v0.20.3',
+        sha: 'abc123',
+        version: '0.20.3',
+      })
+    );
+
+    const findFilesStub = sandbox.stub(
+      releasePR.gh,
+      'findFilesByFilenameAndRef'
+    );
+    findFilesStub
+      .withArgs('pom.xml', 'master', undefined)
+      .resolves(['pom.xml']);
+    findFilesStub.withArgs('build.gradle', 'master', undefined).resolves([]);
+    findFilesStub
+      .withArgs('dependencies.properties', 'master', undefined)
+      .resolves([]);
+
+    const getFileContentsStub = sandbox.stub(
+      releasePR.gh,
+      'getFileContentsOnBranch'
+    );
+    getFileContentsStub
+      .withArgs('versions.txt', 'master')
+      .resolves(buildFileContent('versions.txt'));
+    getFileContentsStub
+      .withArgs('README.md', 'master')
+      .resolves(buildFileContent('README.md'));
+    getFileContentsStub
+      .withArgs('pom.xml', 'master')
+      .resolves(buildFileContent('pom.xml'));
+    getFileContentsStub
+      .withArgs(
+        'google-api-client/src/main/java/com/google/api/client/googleapis/GoogleUtils.java',
+        'master'
+      )
+      .resolves(buildFileContent('GoogleUtils.java'));
+    getFileContentsStub.rejects(
+      Object.assign(Error('not found'), {status: 404})
+    );
+
+    sandbox
+      .stub(releasePR.gh, 'commitsSinceSha')
+      .resolves([
+        buildMockCommit(
+          'fix: Fix declared dependencies from merge issue (#291)'
+        ),
+      ]);
+
+    const addLabelStub = sandbox
+      .stub(releasePR.gh, 'addLabels')
+      .withArgs(['autorelease: pending'], 22)
+      .resolves();
+
+    stubSuggesterWithSnapshot(sandbox, this.test!.fullTitle());
+    await releasePR.run();
+    expect(addLabelStub.callCount).to.eql(1);
+  });
+
+  it('creates a snapshot PR', async function () {
+    const releasePR = new JavaYoshi({
+      github: new GitHub({owner: 'googleapis', repo: 'java-trace'}),
+      packageName: 'java-trace',
       snapshot: true,
     });
+
+    sandbox
+      .stub(releasePR.gh, 'getRepositoryDefaultBranch')
+      .returns(Promise.resolve('master'));
+
+    // No open release PRs, so create a new release PR
+    sandbox
+      .stub(releasePR.gh, 'findOpenReleasePRs')
+      .returns(Promise.resolve([]));
+
+    sandbox
+      .stub(releasePR.gh, 'findMergedReleasePR')
+      .returns(Promise.resolve(undefined));
+
+    // Indicates that there are no PRs currently waiting to be released:
+    sandbox.stub(releasePR, 'latestTag').returns(
+      Promise.resolve({
+        name: 'v0.20.3',
+        sha: 'abc123',
+        version: '0.20.3',
+      })
+    );
+
+    const findFilesStub = sandbox.stub(
+      releasePR.gh,
+      'findFilesByFilenameAndRef'
+    );
+    findFilesStub
+      .withArgs('pom.xml', 'master', undefined)
+      .resolves(['pom.xml']);
+    findFilesStub.withArgs('build.gradle', 'master', undefined).resolves([]);
+    findFilesStub
+      .withArgs('dependencies.properties', 'master', undefined)
+      .resolves([]);
+
+    const getFileContentsStub = sandbox.stub(
+      releasePR.gh,
+      'getFileContentsOnBranch'
+    );
+    getFileContentsStub
+      .withArgs('versions.txt', 'master')
+      .resolves(buildFileContent('released-versions.txt'));
+    getFileContentsStub
+      .withArgs('README.md', 'master')
+      .resolves(buildFileContent('README.md'));
+    getFileContentsStub
+      .withArgs('pom.xml', 'master')
+      .resolves(buildFileContent('pom.xml'));
+    getFileContentsStub
+      .withArgs(
+        'google-api-client/src/main/java/com/google/api/client/googleapis/GoogleUtils.java',
+        'master'
+      )
+      .resolves(buildFileContent('GoogleUtils.java'));
+    getFileContentsStub.rejects(
+      Object.assign(Error('not found'), {status: 404})
+    );
+
+    sandbox
+      .stub(releasePR.gh, 'commitsSinceSha')
+      .resolves([
+        buildMockCommit(
+          'fix(deps): update dependency com.google.cloud:google-cloud-storage to v1.120.0'
+        ),
+      ]);
+
+    // TODO: maybe assert which labels added
+    sandbox.stub(releasePR.gh, 'addLabels');
+
+    stubSuggesterWithSnapshot(sandbox, this.test!.fullTitle());
     await releasePR.run();
-    req.done();
   });
+
+  it('creates a snapshot PR, when latest release sha is head', async function () {
+    const releasePR = new JavaYoshi({
+      github: new GitHub({owner: 'googleapis', repo: 'java-trace'}),
+      packageName: 'java-trace',
+      snapshot: true,
+    });
+
+    sandbox
+      .stub(releasePR.gh, 'getRepositoryDefaultBranch')
+      .returns(Promise.resolve('master'));
+
+    // No open release PRs, so create a new release PR
+    sandbox
+      .stub(releasePR.gh, 'findOpenReleasePRs')
+      .returns(Promise.resolve([]));
+
+    sandbox
+      .stub(releasePR.gh, 'findMergedReleasePR')
+      .returns(Promise.resolve(undefined));
+
+    // Indicates that there are no PRs currently waiting to be released:
+    sandbox.stub(releasePR, 'latestTag').returns(
+      Promise.resolve({
+        name: 'v0.20.3',
+        sha: 'abc123',
+        version: '0.20.3',
+      })
+    );
+
+    const findFilesStub = sandbox.stub(
+      releasePR.gh,
+      'findFilesByFilenameAndRef'
+    );
+    findFilesStub
+      .withArgs('pom.xml', 'master', undefined)
+      .resolves(['pom.xml']);
+    findFilesStub.withArgs('build.gradle', 'master', undefined).resolves([]);
+    findFilesStub
+      .withArgs('dependencies.properties', 'master', undefined)
+      .resolves([]);
+
+    const getFileContentsStub = sandbox.stub(
+      releasePR.gh,
+      'getFileContentsOnBranch'
+    );
+    getFileContentsStub
+      .withArgs('versions.txt', 'master')
+      .resolves(buildFileContent('released-versions.txt'));
+    getFileContentsStub
+      .withArgs('README.md', 'master')
+      .resolves(buildFileContent('README.md'));
+    getFileContentsStub
+      .withArgs('pom.xml', 'master')
+      .resolves(buildFileContent('pom.xml'));
+    getFileContentsStub
+      .withArgs(
+        'google-api-client/src/main/java/com/google/api/client/googleapis/GoogleUtils.java',
+        'master'
+      )
+      .resolves(buildFileContent('GoogleUtils.java'));
+    getFileContentsStub.rejects(
+      Object.assign(Error('not found'), {status: 404})
+    );
+
+    sandbox.stub(releasePR.gh, 'commitsSinceSha').resolves([]);
+
+    // TODO: maybe assert which labels added
+    sandbox.stub(releasePR.gh, 'addLabels');
+
+    stubSuggesterWithSnapshot(sandbox, this.test!.fullTitle());
+    await releasePR.run();
+  });
+
   it('ignores a snapshot release if no snapshot needed', async () => {
-    const versionsContent = readFileSync(
-      resolve(fixturesPath, 'versions.txt'),
-      'utf8'
-    );
-    const req = nock('https://api.github.com')
-      .get('/repos/googleapis/java-trace/pulls?state=closed&per_page=100')
-      .reply(200, undefined)
-      .get('/repos/googleapis/java-trace/contents/versions.txt')
-      .reply(200, {
-        content: Buffer.from(versionsContent, 'utf8').toString('base64'),
-        sha: 'abc123',
-      });
     const releasePR = new JavaYoshi({
-      repoUrl: 'googleapis/java-trace',
-      releaseType: 'java-yoshi',
-      // not actually used by this type of repo.
+      github: new GitHub({owner: 'googleapis', repo: 'java-trace'}),
       packageName: 'java-trace',
-      apiUrl: 'https://api.github.com',
       snapshot: true,
     });
-    await releasePR.run();
-    req.done();
-  });
-  it('ignores an explicit release if a snapshot needed', async () => {
-    const versionsContent = readFileSync(
-      resolve(fixturesPath, 'released-versions.txt'),
-      'utf8'
+
+    sandbox
+      .stub(releasePR.gh, 'getRepositoryDefaultBranch')
+      .returns(Promise.resolve('master'));
+
+    sandbox
+      .stub(releasePR.gh, 'findMergedReleasePR')
+      .returns(Promise.resolve(undefined));
+
+    const getFileContentsStub = sandbox.stub(
+      releasePR.gh,
+      'getFileContentsOnBranch'
     );
-    const req = nock('https://api.github.com')
-      .get('/repos/googleapis/java-trace/pulls?state=closed&per_page=100')
-      .reply(200, undefined)
-      .get('/repos/googleapis/java-trace/contents/versions.txt')
-      .reply(200, {
-        content: Buffer.from(versionsContent, 'utf8').toString('base64'),
-        sha: 'abc123',
-      });
+    getFileContentsStub
+      .withArgs('versions.txt', 'master')
+      .resolves(buildFileContent('versions.txt'));
+    getFileContentsStub.rejects(
+      Object.assign(Error('not found'), {status: 404})
+    );
+
+    // should not attempt to create a pull request
+    sandbox
+      .stub(suggester, 'createPullRequest')
+      .rejects(Error('should not get here'));
+
+    await releasePR.run();
+  });
+
+  it('creates a snapshot PR if an explicit release is requested, but a snapshot is needed', async function () {
     const releasePR = new JavaYoshi({
-      repoUrl: 'googleapis/java-trace',
-      releaseType: 'java-yoshi',
-      // not actually used by this type of repo.
+      github: new GitHub({owner: 'googleapis', repo: 'java-trace'}),
       packageName: 'java-trace',
-      apiUrl: 'https://api.github.com',
       snapshot: false,
     });
+
+    sandbox
+      .stub(releasePR.gh, 'getRepositoryDefaultBranch')
+      .returns(Promise.resolve('master'));
+
+    // No open release PRs, so create a new release PR
+    sandbox
+      .stub(releasePR.gh, 'findOpenReleasePRs')
+      .returns(Promise.resolve([]));
+
+    sandbox
+      .stub(releasePR.gh, 'findMergedReleasePR')
+      .returns(Promise.resolve(undefined));
+
+    // Indicates that there are no PRs currently waiting to be released:
+    sandbox.stub(releasePR, 'latestTag').returns(
+      Promise.resolve({
+        name: 'v0.20.3',
+        sha: 'abc123',
+        version: '0.20.3',
+      })
+    );
+
+    const findFilesStub = sandbox.stub(
+      releasePR.gh,
+      'findFilesByFilenameAndRef'
+    );
+    findFilesStub
+      .withArgs('pom.xml', 'master', undefined)
+      .resolves(['pom.xml']);
+    findFilesStub.withArgs('build.gradle', 'master', undefined).resolves([]);
+    findFilesStub
+      .withArgs('dependencies.properties', 'master', undefined)
+      .resolves([]);
+
+    const getFileContentsStub = sandbox.stub(
+      releasePR.gh,
+      'getFileContentsOnBranch'
+    );
+    getFileContentsStub
+      .withArgs('versions.txt', 'master')
+      .resolves(buildFileContent('released-versions.txt'));
+    getFileContentsStub
+      .withArgs('README.md', 'master')
+      .resolves(buildFileContent('README.md'));
+    getFileContentsStub
+      .withArgs('pom.xml', 'master')
+      .resolves(buildFileContent('pom.xml'));
+    getFileContentsStub
+      .withArgs(
+        'google-api-client/src/main/java/com/google/api/client/googleapis/GoogleUtils.java',
+        'master'
+      )
+      .resolves(buildFileContent('GoogleUtils.java'));
+    getFileContentsStub.rejects(
+      Object.assign(Error('not found'), {status: 404})
+    );
+
+    sandbox
+      .stub(releasePR.gh, 'commitsSinceSha')
+      .resolves([
+        buildMockCommit(
+          'fix(deps): update dependency com.google.cloud:google-cloud-storage to v1.120.0'
+        ),
+      ]);
+
+    // TODO: maybe assert which labels added
+    sandbox.stub(releasePR.gh, 'addLabels');
+
+    stubSuggesterWithSnapshot(sandbox, this.test!.fullTitle());
     await releasePR.run();
-    req.done();
+  });
+
+  it('handles promotion to 1.0.0', async function () {
+    const releasePR = new JavaYoshi({
+      github: new GitHub({owner: 'googleapis', repo: 'java-trace'}),
+      packageName: 'java-trace',
+    });
+
+    sandbox
+      .stub(releasePR.gh, 'getRepositoryDefaultBranch')
+      .returns(Promise.resolve('master'));
+
+    // No open release PRs, so create a new release PR
+    sandbox
+      .stub(releasePR.gh, 'findOpenReleasePRs')
+      .returns(Promise.resolve([]));
+
+    sandbox
+      .stub(releasePR.gh, 'findMergedReleasePR')
+      .returns(Promise.resolve(undefined));
+
+    // Indicates that there are no PRs currently waiting to be released:
+    sandbox.stub(releasePR, 'latestTag').returns(
+      Promise.resolve({
+        name: 'v0.20.3',
+        sha: 'abc123',
+        version: '0.20.3',
+      })
+    );
+
+    const findFilesStub = sandbox.stub(
+      releasePR.gh,
+      'findFilesByFilenameAndRef'
+    );
+    findFilesStub
+      .withArgs('pom.xml', 'master', undefined)
+      .resolves(['pom.xml']);
+    findFilesStub.withArgs('build.gradle', 'master', undefined).resolves([]);
+    findFilesStub
+      .withArgs('dependencies.properties', 'master', undefined)
+      .resolves([]);
+
+    const getFileContentsStub = sandbox.stub(
+      releasePR.gh,
+      'getFileContentsOnBranch'
+    );
+    getFileContentsStub
+      .withArgs('versions.txt', 'master')
+      .resolves(buildFileContent('pre-ga-versions.txt'));
+    getFileContentsStub
+      .withArgs('README.md', 'master')
+      .resolves(buildFileContent('README.md'));
+    getFileContentsStub
+      .withArgs('pom.xml', 'master')
+      .resolves(buildFileContent('pom.xml'));
+    getFileContentsStub
+      .withArgs(
+        'google-api-client/src/main/java/com/google/api/client/googleapis/GoogleUtils.java',
+        'master'
+      )
+      .resolves(buildFileContent('GoogleUtils.java'));
+    getFileContentsStub.rejects(
+      Object.assign(Error('not found'), {status: 404})
+    );
+
+    sandbox
+      .stub(releasePR.gh, 'commitsSinceSha')
+      .resolves([
+        buildMockCommit('feat: promote to 1.0.0 (#292)\n\nRelease-As: 1.0.0'),
+      ]);
+
+    // TODO: maybe assert which labels added
+    sandbox.stub(releasePR.gh, 'addLabels');
+
+    stubSuggesterWithSnapshot(sandbox, this.test!.fullTitle());
+    await releasePR.run();
+  });
+
+  it('creates a release PR against a feature branch', async function () {
+    const defaultBranch = '1.x';
+    const releasePR = new JavaYoshi({
+      github: new GitHub({
+        defaultBranch,
+        owner: 'googleapis',
+        repo: 'java-trace',
+      }),
+      packageName: 'java-trace',
+    });
+
+    sandbox
+      .stub(releasePR.gh, 'getRepositoryDefaultBranch')
+      .returns(Promise.resolve('master'));
+
+    // No open release PRs, so create a new release PR
+    sandbox
+      .stub(releasePR.gh, 'findOpenReleasePRs')
+      .returns(Promise.resolve([]));
+
+    sandbox
+      .stub(releasePR.gh, 'findMergedReleasePR')
+      .returns(Promise.resolve(undefined));
+
+    // Indicates that there are no PRs currently waiting to be released:
+    sandbox.stub(releasePR, 'latestTag').returns(
+      Promise.resolve({
+        name: 'v0.20.3',
+        sha: 'abc123',
+        version: '0.20.3',
+      })
+    );
+
+    const findFilesStub = sandbox.stub(
+      releasePR.gh,
+      'findFilesByFilenameAndRef'
+    );
+    findFilesStub
+      .withArgs('pom.xml', defaultBranch, undefined)
+      .resolves(['pom.xml']);
+    findFilesStub
+      .withArgs('build.gradle', defaultBranch, undefined)
+      .resolves([]);
+    findFilesStub
+      .withArgs('dependencies.properties', defaultBranch, undefined)
+      .resolves([]);
+
+    const getFileContentsStub = sandbox.stub(
+      releasePR.gh,
+      'getFileContentsOnBranch'
+    );
+    getFileContentsStub
+      .withArgs('versions.txt', defaultBranch)
+      .resolves(buildFileContent('versions.txt'));
+    getFileContentsStub
+      .withArgs('README.md', defaultBranch)
+      .resolves(buildFileContent('README.md'));
+    getFileContentsStub
+      .withArgs('pom.xml', defaultBranch)
+      .resolves(buildFileContent('pom.xml'));
+    getFileContentsStub
+      .withArgs(
+        'google-api-client/src/main/java/com/google/api/client/googleapis/GoogleUtils.java',
+        defaultBranch
+      )
+      .resolves(buildFileContent('GoogleUtils.java'));
+    getFileContentsStub.rejects(
+      Object.assign(Error('not found'), {status: 404})
+    );
+
+    sandbox
+      .stub(releasePR.gh, 'commitsSinceSha')
+      .resolves([
+        buildMockCommit(
+          'fix: Fix declared dependencies from merge issue (#291)'
+        ),
+      ]);
+
+    // TODO: maybe assert which labels added
+    sandbox.stub(releasePR.gh, 'addLabels');
+
+    stubSuggesterWithSnapshot(sandbox, this.test!.fullTitle());
+    await releasePR.run();
+  });
+
+  describe('latestTag', () => {
+    let req: nock.Scope;
+    let releasePR: ReleasePR;
+
+    beforeEach(() => {
+      req = nock('https://api.github.com/');
+
+      releasePR = new JavaYoshi({
+        github: new GitHub({owner: 'googleapis', repo: 'java-trace'}),
+      });
+
+      sandbox.stub(releasePR.gh, 'getRepositoryDefaultBranch').resolves('main');
+    });
+
+    it('returns a stable branch pull request', async () => {
+      const graphql = JSON.parse(
+        readFileSync(
+          resolve('./test/fixtures', 'latest-tag-stable-branch.json'),
+          'utf8'
+        )
+      );
+      req.post('/graphql').reply(200, {
+        data: graphql,
+      });
+      const latestTag = await releasePR.latestTag();
+      expect(latestTag!.version).to.equal('1.127.0');
+      req.done();
+    });
+
+    it('returns a prerelease tag stable branch', async () => {
+      const graphql = JSON.parse(
+        readFileSync(
+          resolve('./test/fixtures', 'latest-tag-stable-branch.json'),
+          'utf8'
+        )
+      );
+      req.post('/graphql').reply(200, {
+        data: graphql,
+      });
+      const latestTag = await releasePR.latestTag(undefined, true);
+      expect(latestTag!.version).to.equal('1.127.1-SNAPSHOT');
+      req.done();
+    });
+
+    it('returns a renamed PR title', async () => {
+      const graphql = JSON.parse(
+        readFileSync(
+          resolve('./test/fixtures', 'latest-tag-renamed.json'),
+          'utf8'
+        )
+      );
+      req.post('/graphql').reply(200, {
+        data: graphql,
+      });
+      const latestTag = await releasePR.latestTag();
+      expect(latestTag!.version).to.equal('1.2.1');
+      req.done();
+    });
   });
 });
