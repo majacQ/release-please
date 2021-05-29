@@ -12,13 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import {ReleasePR, ReleaseCandidate} from '../release-pr';
-
-import {ConventionalCommits} from '../conventional-commits';
-import {GitHubTag} from '../github';
-import {checkpoint, CheckpointType} from '../util/checkpoint';
+import {ReleaseCandidate, PackageName, ReleasePR} from '../release-pr';
 import {Update} from '../updaters/update';
-import {Commit} from '../graphql-to-commits';
 
 // Generic
 import {Changelog} from '../updaters/changelog';
@@ -27,54 +22,19 @@ import {ReadMe} from '../updaters/terraform/readme';
 import {ModuleVersion} from '../updaters/terraform/module-version';
 
 export class TerraformModule extends ReleasePR {
-  static releaserName = 'terraform-module';
-  protected async _run(): Promise<number | undefined> {
-    const latestTag: GitHubTag | undefined = await this.gh.latestTag(
-      this.monorepoTags ? `${this.packageName}-` : undefined
-    );
-    const commits: Commit[] = await this.commits({
-      sha: latestTag ? latestTag.sha : undefined,
-      path: this.path,
-    });
-
-    const cc = new ConventionalCommits({
-      commits,
-      githubRepoUrl: this.repoUrl,
-      bumpMinorPreMajor: this.bumpMinorPreMajor,
-      changelogSections: this.changelogSections,
-    });
-    const candidate: ReleaseCandidate = await this.coerceReleaseCandidate(
-      cc,
-      latestTag
-    );
-
-    const changelogEntry: string = await cc.generateChangelogEntry({
-      version: candidate.version,
-      currentTag: `v${candidate.version}`,
-      previousTag: candidate.previousTag,
-    });
-
-    // don't create a release candidate until user facing changes
-    // (fix, feat, BREAKING CHANGE) have been made; a CHANGELOG that's
-    // one line is a good indicator that there were no interesting commits.
-    if (this.changelogEmpty(changelogEntry)) {
-      checkpoint(
-        `no user facing commits found since ${
-          latestTag ? latestTag.sha : 'beginning of time'
-        }`,
-        CheckpointType.Failure
-      );
-      return undefined;
-    }
-
+  protected async buildUpdates(
+    changelogEntry: string,
+    candidate: ReleaseCandidate,
+    packageName: PackageName
+  ): Promise<Update[]> {
     const updates: Update[] = [];
 
     updates.push(
       new Changelog({
-        path: this.addPath('CHANGELOG.md'),
+        path: this.addPath(this.changelogPath),
         changelogEntry,
         version: candidate.version,
-        packageName: this.packageName,
+        packageName: packageName.name,
       })
     );
 
@@ -87,35 +47,33 @@ export class TerraformModule extends ReleasePR {
           path: this.addPath(path),
           changelogEntry,
           version: candidate.version,
-          packageName: this.packageName,
+          packageName: packageName.name,
         })
       );
     });
 
     // Update versions.tf to current candidate version.
-    // A module may have submodules, so find all versions.tf to update.
-    const versionFiles = await this.gh.findFilesByFilename('versions.tf');
+    // A module may have submodules, so find all versions.tfand versions.tf.tmpl to update.
+    const versionFiles = await Promise.all([
+      this.gh.findFilesByFilename('versions.tf'),
+      this.gh.findFilesByFilename('versions.tf.tmpl'),
+    ]).then(([v, vt]) => {
+      return v.concat(vt);
+    });
     versionFiles.forEach(path => {
       updates.push(
         new ModuleVersion({
           path: this.addPath(path),
           changelogEntry,
           version: candidate.version,
-          packageName: this.packageName,
+          packageName: packageName.name,
         })
       );
     });
-
-    return await this.openPR({
-      sha: commits[0].sha!,
-      changelogEntry: `${changelogEntry}\n---\n`,
-      updates,
-      version: candidate.version,
-      includePackageName: this.monorepoTags,
-    });
+    return updates;
   }
 
-  protected defaultInitialVersion(): string {
+  defaultInitialVersion(): string {
     return '0.1.0';
   }
 }

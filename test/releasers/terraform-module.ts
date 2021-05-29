@@ -16,21 +16,16 @@ import {describe, it, afterEach, beforeEach} from 'mocha';
 import {TerraformModule} from '../../src/releasers/terraform-module';
 import {readFileSync} from 'fs';
 import {resolve} from 'path';
-import {stringifyExpectedChanges, readPOJO} from '../helpers';
+import {readPOJO, stubSuggesterWithSnapshot} from '../helpers';
 import * as nock from 'nock';
-import * as snapshot from 'snap-shot-it';
-import * as suggester from 'code-suggester';
 import * as sinon from 'sinon';
+import {GitHub} from '../../src/github';
 
 nock.disableNetConnect();
 const sandbox = sinon.createSandbox();
 const fixturesPath = './test/releasers/fixtures/terraform';
 const releasePR = new TerraformModule({
-  repoUrl: 'googleapis/terraform-test-repo',
-  releaseType: 'terraform-module',
-  // not actually used by this type of repo.
-  packageName: 'terraform-test-repo',
-  apiUrl: 'https://api.github.com',
+  github: new GitHub({owner: 'googleapis', repo: 'terraform-test-repo'}),
 });
 
 describe('terraform-module', () => {
@@ -39,8 +34,14 @@ describe('terraform-module', () => {
       // simple-module with module versions defined
       name: 'simple-module',
       findVersionFiles: ['versions.tf'],
+      findTemplatedVersionFiles: ['versions.tf.tmpl'],
       findReadmeFiles: ['readme.md'],
-      readFilePaths: ['simple-module/readme.md', 'simple-module/versions.tf'],
+      readFilePaths: [
+        'simple-module/readme.md',
+        'simple-module/versions.tf',
+        'simple-module/versions.tf.tmpl',
+      ],
+      expectedVersion: '12.1.0',
     },
     {
       // module-submodule with submodules
@@ -51,6 +52,7 @@ describe('terraform-module', () => {
         'versions.tf',
         'modules/sub-module-with-version/versions.tf',
       ],
+      findTemplatedVersionFiles: [],
       findReadmeFiles: [
         'README.md',
         'modules/sub-module-with-version/readme.md',
@@ -63,13 +65,16 @@ describe('terraform-module', () => {
         'module-submodule/versions.tf',
         'module-submodule/modules/sub-module-with-version/versions.tf',
       ],
+      expectedVersion: '2.1.0',
     },
     {
       // module-no-versions with no module versions defined in versions.tf
       name: 'module-no-versions',
       findVersionFiles: [],
+      findTemplatedVersionFiles: [],
       findReadmeFiles: ['module-no-versions/README.MD'],
       readFilePaths: ['module-no-versions/README.MD'],
+      expectedVersion: '2.1.0',
     },
   ];
   beforeEach(() => {
@@ -97,20 +102,22 @@ describe('terraform-module', () => {
   });
   describe('run', () => {
     tests.forEach(test => {
-      it(`creates a release PR for ${test.name}`, async () => {
+      it(`creates a release PR for ${test.name}`, async function () {
         sandbox
           .stub(releasePR.gh, 'findFilesByFilename')
           .onFirstCall()
           .returns(Promise.resolve(test.findReadmeFiles))
           .onSecondCall()
-          .returns(Promise.resolve(test.findVersionFiles));
+          .returns(Promise.resolve(test.findVersionFiles))
+          .onThirdCall()
+          .returns(Promise.resolve(test.findTemplatedVersionFiles));
 
         // Return latest tag used to determine next version #:
-        sandbox.stub(releasePR.gh, 'latestTag').returns(
+        sandbox.stub(releasePR, 'latestTag').returns(
           Promise.resolve({
             sha: 'da6e52d956c1e35d19e75e0f2fdba439739ba364',
-            name: 'v2.1.0',
-            version: '2.1.0',
+            name: `v${test.expectedVersion}`,
+            version: test.expectedVersion,
           })
         );
 
@@ -136,30 +143,11 @@ describe('terraform-module', () => {
           });
         });
 
-        // We stub the entire suggester API, these updates are generally the
-        // most interesting thing under test, as they represent the changes
-        // that will be pushed up to GitHub:
-        let expectedChanges: [string, object][] = [];
-        sandbox.replace(
-          suggester,
-          'createPullRequest',
-          (_octokit, changes): Promise<number> => {
-            expectedChanges = [...(changes as Map<string, object>)]; // Convert map to key/value pairs.
-            return Promise.resolve(22);
-          }
-        );
-
-        // Call made to close any stale release PRs still open on GitHub:
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        sandbox.stub(releasePR as any, 'closeStaleReleasePRs');
-
         // Call to add autorelease: pending label:
         sandbox.stub(releasePR.gh, 'addLabels');
 
+        stubSuggesterWithSnapshot(sandbox, this.test!.fullTitle());
         await releasePR.run();
-
-        // Did we generate all the changes to files we expected to?
-        snapshot(stringifyExpectedChanges(expectedChanges));
       });
     });
   });

@@ -14,9 +14,10 @@
 
 import {ReleasePR} from '../release-pr';
 
+import {Go} from './go';
 import {GoYoshi} from './go-yoshi';
-import {JavaAuthYoshi} from './java-auth-yoshi';
 import {JavaBom} from './java-bom';
+import {JavaLTS} from './java-lts';
 import {JavaYoshi} from './java-yoshi';
 import {Node} from './node';
 import {PHPYoshi} from './php-yoshi';
@@ -27,32 +28,60 @@ import {Simple} from './simple';
 import {TerraformModule} from './terraform-module';
 import {Rust} from './rust';
 import {OCaml} from './ocaml';
+import {Helm} from './helm';
 
-// TODO: add any new releasers you create to this list:
-export function getReleasers(): {[key: string]: typeof ReleasePR} {
-  const releasers = {
-    go: GoYoshi, // TODO(codyoss): refactor this into a more generic go strategy.
-    'go-yoshi': GoYoshi,
-    'java-auth-yoshi': JavaAuthYoshi,
-    'java-bom': JavaBom,
-    'java-yoshi': JavaYoshi,
-    node: Node,
-    'php-yoshi': PHPYoshi,
-    python: Python,
-    'ruby-yoshi': RubyYoshi,
-    ruby: Ruby,
-    simple: Simple,
-    'terraform-module': TerraformModule,
-    rust: Rust,
-    ocaml: OCaml,
-  };
+// add any new releasers you create to this type as well as the `releasers`
+// object below.
+export type ReleaseType =
+  | 'go'
+  | 'go-yoshi'
+  | 'java-bom'
+  | 'java-lts'
+  | 'java-yoshi'
+  | 'node'
+  | 'ocaml'
+  | 'php-yoshi'
+  | 'python'
+  | 'ruby'
+  | 'ruby-yoshi'
+  | 'rust'
+  | 'simple'
+  | 'terraform-module'
+  | 'helm';
+
+type Releasers = Record<ReleaseType, typeof ReleasePR>;
+
+const releasers: Releasers = {
+  go: Go,
+  'go-yoshi': GoYoshi,
+  'java-bom': JavaBom,
+  'java-lts': JavaLTS,
+  'java-yoshi': JavaYoshi,
+  node: Node,
+  ocaml: OCaml,
+  'php-yoshi': PHPYoshi,
+  python: Python,
+  ruby: Ruby,
+  'ruby-yoshi': RubyYoshi,
+  rust: Rust,
+  simple: Simple,
+  'terraform-module': TerraformModule,
+  helm: Helm,
+};
+
+export function getReleasers(): Releasers {
   return releasers;
 }
 
+// deprecated, use getReleaserTypes
 export function getReleaserNames(): string[] {
-  const releasers = getReleasers();
-  return Object.keys(releasers).map(key => {
-    const releaser = releasers[key];
-    return releaser.releaserName;
-  });
+  return getReleaserTypes() as string[];
+}
+
+export function getReleaserTypes(): readonly ReleaseType[] {
+  const names: ReleaseType[] = [];
+  for (const releaseType of Object.keys(releasers)) {
+    names.push(releaseType as ReleaseType);
+  }
+  return names;
 }

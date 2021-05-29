@@ -28,7 +28,7 @@ describe('PackageJson', () => {
         'utf8'
       );
       const packageJson = new PackageJson({
-        path: 'packae.json',
+        path: 'package.json',
         changelogEntry: '',
         version: '14.0.0',
         packageName: '@google-cloud/foo',

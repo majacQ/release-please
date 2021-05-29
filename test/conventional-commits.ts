@@ -20,6 +20,43 @@ import * as snapshot from 'snap-shot-it';
 
 describe('ConventionalCommits', () => {
   describe('suggestBump', () => {
+    it('uses default CC version bump strategy', async () => {
+      const cc = new ConventionalCommits({
+        commits: [
+          {
+            message: 'fix: addressed issues with foo',
+            sha: 'abc123',
+            files: [],
+          },
+          {message: 'feat: awesome feature', sha: 'abc678', files: []},
+        ],
+        owner: 'bcoe',
+        repository: 'release-please',
+      });
+      const bump = await cc.suggestBump('1.0.0');
+      expect(bump.releaseType).to.equal('minor');
+      expect(bump.reason).to.equal(
+        'There are 0 BREAKING CHANGES and 1 features'
+      );
+    });
+    it('uses configured CC version bump strategy', async () => {
+      const cc = new ConventionalCommits({
+        versionBumpStrategy: 'always-patch',
+        commits: [
+          {
+            message: 'fix: addressed issues with foo',
+            sha: 'abc123',
+            files: [],
+          },
+          {message: 'feat: awesome feature', sha: 'abc678', files: []},
+        ],
+        owner: 'bcoe',
+        repository: 'release-please',
+      });
+      const bump = await cc.suggestBump('1.0.0');
+      expect(bump.releaseType).to.equal('patch');
+      expect(bump.reason).to.equal('Always bump patch strategy: 0 features');
+    });
     it('suggests minor release for breaking change pre 1.0', async () => {
       const cc = new ConventionalCommits({
         commits: [
@@ -36,12 +73,35 @@ describe('ConventionalCommits', () => {
           },
           {message: 'feat: awesome feature', sha: 'abc678', files: []},
         ],
-        githubRepoUrl: 'https://github.com/bcoe/release-please.git',
+        owner: 'bcoe',
+        repository: 'release-please',
         bumpMinorPreMajor: true,
       });
       const bump = await cc.suggestBump('0.3.0');
       expect(bump.releaseType).to.equal('minor');
       expect(bump.reason).to.equal('There is 1 BREAKING CHANGE and 1 features');
+    });
+
+    it('follows standard patch for minor bump behavior pre 1.0', async () => {
+      const cc = new ConventionalCommits({
+        commits: [
+          {
+            message: 'fix: addressed issues with foo',
+            sha: 'abc123',
+            files: [],
+          },
+          {message: 'feat: awesome feature', sha: 'abc678', files: []},
+        ],
+        owner: 'bcoe',
+        repository: 'release-please',
+        bumpMinorPreMajor: true,
+        bumpPatchForMinorPreMajor: true,
+      });
+      const bump = await cc.suggestBump('0.3.0');
+      expect(bump.releaseType).to.equal('patch');
+      expect(bump.reason).to.equal(
+        'There are 0 BREAKING CHANGES and 1 features'
+      );
     });
   });
 
@@ -57,7 +117,8 @@ describe('ConventionalCommits', () => {
           },
           {message: 'feat: awesome feature', sha: 'abc678', files: []},
         ],
-        githubRepoUrl: 'https://github.com/bcoe/release-please.git',
+        owner: 'bcoe',
+        repository: 'release-please',
         bumpMinorPreMajor: true,
       });
       const cl = await cc.generateChangelogEntry({
@@ -77,7 +138,8 @@ describe('ConventionalCommits', () => {
           },
           {message: 'feat: awesome feature', sha: 'abc678', files: []},
         ],
-        githubRepoUrl: 'https://github.com/bcoe/release-please.git',
+        owner: 'bcoe',
+        repository: 'release-please',
         bumpMinorPreMajor: true,
       });
       const cl = await cc.generateChangelogEntry({
@@ -97,7 +159,8 @@ describe('ConventionalCommits', () => {
           },
           {message: 'feat: awesome feature', sha: 'abc678', files: []},
         ],
-        githubRepoUrl: 'https://github.com/bcoe/release-please.git',
+        owner: 'bcoe',
+        repository: 'release-please',
         bumpMinorPreMajor: true,
       });
       const cl = await cc.generateChangelogEntry({
@@ -118,7 +181,8 @@ describe('ConventionalCommits', () => {
           },
           {message: 'feat: awesome feature', sha: 'abc678', files: []},
         ],
-        githubRepoUrl: 'https://github.com/bcoe/release-please.git',
+        owner: 'bcoe',
+        repository: 'release-please',
         bumpMinorPreMajor: true,
       });
       const cl = await cc.generateChangelogEntry({
@@ -138,7 +202,8 @@ describe('ConventionalCommits', () => {
           },
           {message: 'feat: awesome feature', sha: 'abc678', files: []},
         ],
-        githubRepoUrl: 'https://github.com/bcoe/release-please.git',
+        owner: 'bcoe',
+        repository: 'release-please',
         bumpMinorPreMajor: true,
       });
       const cl = await cc.generateChangelogEntry({
@@ -168,7 +233,8 @@ fix(securitycenter): fixes security center.
           },
           {message: 'feat: awesome feature', sha: 'abc678', files: []},
         ],
-        githubRepoUrl: 'https://github.com/bcoe/release-please.git',
+        owner: 'bcoe',
+        repository: 'release-please',
         bumpMinorPreMajor: true,
       });
       const cl = await cc.generateChangelogEntry({
@@ -202,7 +268,29 @@ fix(securitycenter): fixes security center.
             files: [],
           },
         ],
-        githubRepoUrl: 'https://github.com/bcoe/release-please.git',
+        owner: 'bcoe',
+        repository: 'release-please',
+        bumpMinorPreMajor: true,
+      });
+      const cl = await cc.generateChangelogEntry({
+        version: 'v1.0.0',
+      });
+      snapshot(cl.replace(/[0-9]{4}-[0-9]{2}-[0-9]{2}/g, '1665-10-10'));
+    });
+
+    it('includes any commits with a "Release-As" footer', async () => {
+      const cc = new ConventionalCommits({
+        commits: [
+          {
+            message: `meta: correct release
+
+Release-As: v3.0.0`,
+            sha: 'abc345',
+            files: [],
+          },
+        ],
+        owner: 'bcoe',
+        repository: 'release-please',
         bumpMinorPreMajor: true,
       });
       const cl = await cc.generateChangelogEntry({

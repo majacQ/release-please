@@ -6,7 +6,7 @@
 [![codecov](https://img.shields.io/codecov/c/github/googleapis/release-please/master.svg?style=flat)](https://codecov.io/gh/googleapis/release-please)
 
 Release Please automates CHANGELOG generation, the creation of GitHub releases,
-and version bumps for your projects. 
+and version bumps for your projects.
 
 It does so by parsing your
 git history, looking for [Conventional Commit messages](https://www.conventionalcommits.org/),
@@ -20,7 +20,21 @@ release-please maintains Release PRs:
 <img width="400" src="/screen.png">
 
 These Release PRs are kept up-to-date as additional work is merged. When you're
-ready to tag a release, simply merge the release PR.
+ready to tag a release, simply merge the release PR. Both squash-merge and
+merge commits work with Release PRs.
+
+When the Release PR is merged, release-please takes the following steps:
+
+1. Updates your changelog file (for example `CHANGELOG.md`), along with other language specific files (for example `package.json`).
+2. Tags the commit with the version number
+3. Creates a GitHub Release based on the tag
+
+You can tell where the Release PR is its lifecycle by the status label on the
+PR itself:
+
+- `autorelease:pending` is the initial state of the Release PR before it is merged
+- `autorelease:tagged` means that the Release PR has been merged and the release has been tagged in GitHub
+- `autorelease:published` means that a GitHub release has been published based on the Release PR (_release-please does not automatically add this tag, but we recommend it as a convention for publication tooling_).
 
 ## How should I write my commits?
 
@@ -28,7 +42,7 @@ Release Please assumes you are using [Conventional Commit messages](https://www.
 
 The most important prefixes you should have in mind are:
 
-* `fix:` which represents bug fixes, and correlates to a [SemVer](https://semver.org/) 
+* `fix:` which represents bug fixes, and correlates to a [SemVer](https://semver.org/)
   patch.
 * `feat:` which represents a new feature, and correlates to a SemVer minor.
 * `feat!:`,  or `fix!:`, `refactor!:`, etc., which represent a breaking change
@@ -39,7 +53,7 @@ The most important prefixes you should have in mind are:
 Release Please allows you to represent multiple changes in a single commit,
 using footers:
 
-```
+```txt
 feat: adds v4 UUID to crypto
 
 This adds support for v4 UUIDs to the library.
@@ -63,17 +77,17 @@ The above commit message will contain:
 
 ## How do I change the version number?
 
-When a commit to the main branch has `Release-As: x.x.x` in the **commit body**, Release Please will open a new pull request for the specified version.
+When a commit to the main branch has `Release-As: x.x.x`(case insensitive) in the **commit body**, Release Please will open a new pull request for the specified version.
 
 **Empty commit example:**
 
 `git commit --allow-empty -m "chore: release 2.0.0" -m "Release-As: 2.0.0"` results in the following commit message:
-```
+
+```txt
 chore: release 2.0.0
 
 Release-As: 2.0.0
 ```
-
 
 ## Release types supported
 
@@ -82,11 +96,12 @@ Release Please automates releases for the following flavors of repositories:
 | release type            | description
 |-------------------|---------------------------------------------------------|
 | node              | [A Node.js repository, with a package.json and CHANGELOG.md](https://github.com/yargs/yargs) |
-| python            | [A Python repository, with a setup.py, setup.cfg, and CHANGELOG.md](https://github.com/googleapis/python-storage) |
+| python            | [A Python repository, with a setup.py, setup.cfg, CHANGELOG.md](https://github.com/googleapis/python-storage) and optionally a pyproject.toml and a &lt;project&gt;/\_\_init\_\_.py |
 | terraform-module  | [A terraform module, with a version in the README.md, and a CHANGELOG.md](https://github.com/terraform-google-modules/terraform-google-project-factory) |
 | rust              | A Rust repository, with a Cargo.toml (either as a crate or workspace) and a CHANGELOG.md |
 | ocaml             | [An OCaml repository, containing 1 or more opam or esy files and a CHANGELOG.md](https://github.com/grain-lang/binaryen.ml) |
 | simple            | [A repository with a version.txt and a CHANGELOG.md](https://github.com/googleapis/gapic-generator) |
+| helm              | A repository with a Chart.yaml and a CHANGELOG.md |
 
 ## Adding additional release types
 
@@ -119,7 +134,7 @@ The easiest way to run release please is as a GitHub action:
       release-please:
         runs-on: ubuntu-latest
         steps:
-          - uses: GoogleCloudPlatform/release-please-action@v1.3.0
+          - uses: GoogleCloudPlatform/release-please-action@v2
             with:
               token: ${{ secrets.GITHUB_TOKEN }}
               release-type: node
@@ -146,7 +161,7 @@ jobs:
   release-please:
     runs-on: ubuntu-latest
     steps:
-      - uses: GoogleCloudPlatform/release-please-action@v1.3.0
+      - uses: GoogleCloudPlatform/release-please-action@v2
         id: release
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
@@ -198,6 +213,7 @@ release-please release-pr --package-name=@google-cloud/firestore" \
 | `--default-branch`| branch to open pull release PR against (detected by default). |
 | `--path`          | create a release from a path other than the repository's root |
 | `--monorepo-tags` | add prefix to tags and branches, allowing multiple libraries to be released from the same repository. |
+| `--pull-request-title-pattern` | add title pattern to make release PR, defaults to using `chore${scope}: release${component} ${version}`. |
 
 ### Creating a release on GitHub
 

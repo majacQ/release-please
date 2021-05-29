@@ -12,9 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import {checkpoint, CheckpointType} from '../../util/checkpoint';
 import {Update, UpdateOptions, VersionsMap} from '../update';
 import {GitHubFileContents} from '../../github';
+import {logger} from '../../util/logger';
 
 export class ModuleVersion implements Update {
   path: string;
@@ -33,13 +33,15 @@ export class ModuleVersion implements Update {
     this.packageName = options.packageName;
   }
   updateContent(content: string): string {
-    const oldVersion = content.match(/v[0-9]\.[0-9]+\.[0-9](-\w+)?/);
+    const oldVersion = content.match(/v[0-9]+\.[0-9]+\.[0-9]+(-\w+)?/);
     if (oldVersion) {
-      checkpoint(
-        `updating ${this.path} from ${oldVersion} to v${this.version}`,
-        CheckpointType.Success
+      logger.info(
+        `updating ${this.path} from ${oldVersion} to v${this.version}`
       );
     }
-    return content.replace(/v[0-9]\.[0-9]+\.[0-9](-\w+)?/g, `v${this.version}`);
+    return content.replace(
+      /v[0-9]+\.[0-9]+\.[0-9]+(-\w+)?/g,
+      `v${this.version}`
+    );
   }
 }

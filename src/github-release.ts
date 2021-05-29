@@ -12,204 +12,143 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import chalk = require('chalk');
-import {checkpoint, CheckpointType} from './util/checkpoint';
-import {packageBranchPrefix} from './util/package-branch-prefix';
-import {ReleasePRFactory} from './release-pr-factory';
-import {GitHub, OctokitAPIs} from './github';
+import {GitHubReleaseConstructorOptions} from './';
+import {GitHub, MergedGitHubPR, ReleaseCreateResponse} from './github';
 import {parse} from 'semver';
+import {ReleasePR, CandidateRelease} from './release-pr';
+import {logger} from './util/logger';
 
-// eslint-disable-next-line @typescript-eslint/no-var-requires
-const parseGithubRepoUrl = require('parse-github-repo-url');
-const GITHUB_RELEASE_LABEL = 'autorelease: tagged';
+export const GITHUB_RELEASE_LABEL = 'autorelease: tagged';
 
-interface ReleaseResponse {
+export interface GitHubReleaseResponse {
   major: number;
   minor: number;
   patch: number;
   version: string;
   sha: string;
   html_url: string;
+  name: string;
   tag_name: string;
   upload_url: string;
   pr: number;
   draft: boolean;
-}
-
-export interface GitHubReleaseOptions {
-  label: string;
-  repoUrl: string;
-  path?: string;
-  packageName?: string;
-  monorepoTags?: boolean;
-  token?: string;
-  apiUrl: string;
-  proxyKey?: string;
-  octokitAPIs?: OctokitAPIs;
-  releaseType?: string;
-  changelogPath?: string;
-  draft?: boolean;
+  body: string;
 }
 
 export class GitHubRelease {
-  apiUrl: string;
-  changelogPath: string;
+  releasePR: ReleasePR;
   gh: GitHub;
-  labels: string[];
-  repoUrl: string;
-  path?: string;
-  packageName?: string;
-  monorepoTags?: boolean;
-  token?: string;
-  proxyKey?: string;
-  releaseType?: string;
-  draft?: boolean;
+  draft: boolean;
+  releaseLabel: string;
 
-  constructor(options: GitHubReleaseOptions) {
-    this.apiUrl = options.apiUrl;
-    this.proxyKey = options.proxyKey;
-    this.labels = options.label.split(',');
-    this.repoUrl = options.repoUrl;
-    this.monorepoTags = options.monorepoTags;
-    this.token = options.token;
-    this.path = options.path;
-    this.packageName = options.packageName;
-    this.releaseType = options.releaseType;
-    this.draft = options.draft;
-
-    this.changelogPath = options.changelogPath ?? 'CHANGELOG.md';
-
-    this.gh = this.gitHubInstance(options.octokitAPIs);
+  constructor(options: GitHubReleaseConstructorOptions) {
+    this.draft = !!options.draft;
+    this.gh = options.github;
+    this.releasePR = options.releasePR;
+    this.releaseLabel = options.releaseLabel ?? GITHUB_RELEASE_LABEL;
   }
 
-  async createRelease(): Promise<ReleaseResponse | undefined> {
-    // Attempt to lookup the package name from a well known location, such
-    // as package.json, if none is provided:
-    if (!this.packageName && this.releaseType) {
-      this.packageName = await ReleasePRFactory.class(
-        this.releaseType
-      ).lookupPackageName(this.gh, this.path);
-    }
-    if (this.packageName === undefined) {
-      throw Error(
-        `could not determine package name for release repo = ${this.repoUrl}`
+  async createRelease(): Promise<
+    [CandidateRelease, ReleaseCreateResponse] | [undefined, undefined]
+  >;
+  async createRelease(
+    version: string,
+    mergedPR: MergedGitHubPR
+  ): Promise<ReleaseCreateResponse | undefined>;
+  async createRelease(
+    version?: string,
+    mergedPR?: MergedGitHubPR
+  ): Promise<
+    | [CandidateRelease, ReleaseCreateResponse]
+    | [undefined, undefined]
+    | ReleaseCreateResponse
+    | undefined
+  > {
+    let candidate: CandidateRelease | undefined;
+    if (version && mergedPR) {
+      candidate = await this.releasePR.buildReleaseForVersion(
+        version,
+        mergedPR
       );
+      return await this.gh.createRelease(
+        candidate.name,
+        candidate.tag,
+        candidate.sha,
+        candidate.notes,
+        this.draft
+      );
+    } else {
+      candidate = await this.releasePR.buildRelease();
+    }
+    if (candidate !== undefined) {
+      const release = await this.gh.createRelease(
+        candidate.name,
+        candidate.tag,
+        candidate.sha,
+        candidate.notes,
+        this.draft
+      );
+      return [candidate, release];
+    } else {
+      logger.error('Unable to build candidate');
+      return [undefined, undefined];
+    }
+  }
+
+  async run(): Promise<GitHubReleaseResponse | undefined> {
+    const [candidate, release] = await this.createRelease();
+    if (!(candidate && release)) {
+      return;
     }
 
-    // In most configurations, createRelease() should be called close to when
-    // a release PR is merged, e.g., a GitHub action that kicks off this
-    // workflow on merge. For this reason, we can pull a fairly small number of PRs:
-    const pageSize = 50;
-    const gitHubReleasePR = await this.gh.findMergedReleasePR(
-      this.labels,
-      pageSize,
-      this.monorepoTags
-        ? packageBranchPrefix(this.packageName, this.releaseType)
-        : undefined,
-      true,
-      'updated'
-    );
-    if (!gitHubReleasePR) {
-      checkpoint('no recent release PRs found', CheckpointType.Failure);
-      return undefined;
-    }
-    const version = `v${gitHubReleasePR.version}`;
-
-    checkpoint(
-      `found release branch ${chalk.green(version)} at ${chalk.green(
-        gitHubReleasePR.sha
-      )}`,
-      CheckpointType.Success
+    // Comment on the release PR with the
+    await this.gh.commentOnIssue(
+      `:robot: Release is at ${release.html_url} :sunflower:`,
+      candidate.pullNumber
     );
 
-    const changelogContents = (
-      await this.gh.getFileContents(this.addPath(this.changelogPath))
-    ).parsedContent;
-    const latestReleaseNotes = GitHubRelease.extractLatestReleaseNotes(
-      changelogContents,
-      version
-    );
-    checkpoint(
-      `found release notes: \n---\n${chalk.grey(latestReleaseNotes)}\n---\n`,
-      CheckpointType.Success
-    );
-    // Go uses '/' for a tag separator, rather than '-':
-    let tagSeparator = '-';
-    if (this.releaseType) {
-      tagSeparator = ReleasePRFactory.class(this.releaseType).tagSeparator();
-    }
-
-    const release = await this.gh.createRelease(
-      this.packageName,
-      this.monorepoTags
-        ? `${this.packageName}${tagSeparator}${version}`
-        : version,
-      gitHubReleasePR.sha,
-      latestReleaseNotes,
-      !!this.draft
-    );
     // Add a label indicating that a release has been created on GitHub,
     // but a publication has not yet occurred.
-    await this.gh.addLabels([GITHUB_RELEASE_LABEL], gitHubReleasePR.number);
+    await this.gh.addLabels([this.releaseLabel], candidate.pullNumber);
     // Remove 'autorelease: pending' which indicates a GitHub release
     // has not yet been created.
-    await this.gh.removeLabels(this.labels, gitHubReleasePR.number);
+    await this.gh.removeLabels(this.releasePR.labels, candidate.pullNumber);
+    return this.releaseResponse({
+      release,
+      version: candidate.version,
+      sha: candidate.sha,
+      number: candidate.pullNumber,
+    });
+  }
 
-    const parsedVersion = parse(version, {loose: true});
+  releaseResponse(params: {
+    release: ReleaseCreateResponse;
+    version: string;
+    sha: string;
+    number: number;
+  }): GitHubReleaseResponse | undefined {
+    logger.info(`Created release: ${params.release.html_url}.`);
+    const parsedVersion = parse(params.version, {loose: true});
     if (parsedVersion) {
       return {
         major: parsedVersion.major,
         minor: parsedVersion.minor,
         patch: parsedVersion.patch,
-        sha: gitHubReleasePR.sha,
-        version,
-        pr: gitHubReleasePR.number,
-        html_url: release.html_url,
-        tag_name: release.tag_name,
-        upload_url: release.upload_url,
-        draft: release.draft,
+        sha: params.sha,
+        version: params.version,
+        pr: params.number,
+        html_url: params.release.html_url,
+        name: params.release.name,
+        tag_name: params.release.tag_name,
+        upload_url: params.release.upload_url,
+        draft: params.release.draft,
+        body: params.release.body,
       };
     } else {
-      console.warn(`failed to parse version informatino from ${version}`);
+      console.warn(
+        `failed to parse version information from ${params.version}`
+      );
       return undefined;
     }
-  }
-
-  addPath(file: string) {
-    if (this.path === undefined) {
-      return file;
-    } else {
-      const path = this.path.replace(/[/\\]$/, '');
-      file = file.replace(/^[/\\]/, '');
-      return `${path}/${file}`;
-    }
-  }
-
-  private gitHubInstance(octokitAPIs?: OctokitAPIs): GitHub {
-    const [owner, repo] = parseGithubRepoUrl(this.repoUrl);
-    return new GitHub({
-      token: this.token,
-      owner,
-      repo,
-      apiUrl: this.apiUrl,
-      proxyKey: this.proxyKey,
-      octokitAPIs,
-    });
-  }
-
-  static extractLatestReleaseNotes(
-    changelogContents: string,
-    version: string
-  ): string {
-    version = version.replace(/^v/, '');
-    const latestRe = new RegExp(
-      `## v?\\[?${version}[^\\n]*\\n(.*?)(\\n##\\s|\\n### \\[?[0-9]+\\.|($(?![\r\n])))`,
-      'ms'
-    );
-    const match = changelogContents.match(latestRe);
-    if (!match) {
-      throw Error('could not find changelog entry corresponding to release PR');
-    }
-    return match[1];
   }
 }

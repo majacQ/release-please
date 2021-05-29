@@ -4,6 +4,290 @@
 
 [1]: https://www.npmjs.com/package/release-please?activeTab=versions
 
+## [11.13.0](https://www.github.com/googleapis/release-please/compare/v11.12.1...v11.13.0) (2021-05-26)
+
+
+### Features
+
+* add `gcf-owl-bot[bot]` to `ignoreAuthors` ([#910](https://www.github.com/googleapis/release-please/issues/910)) ([e5cd486](https://www.github.com/googleapis/release-please/commit/e5cd48618532fb5b627da53537c15a122832622b))
+
+
+### Bug Fixes
+
+* update simple releaser for monorepo pkg path ([#917](https://www.github.com/googleapis/release-please/issues/917)) ([9170e53](https://www.github.com/googleapis/release-please/commit/9170e530781d8705d27cea51053c2825f111f12b))
+
+### [11.12.1](https://www.github.com/googleapis/release-please/compare/v11.12.0...v11.12.1) (2021-05-11)
+
+
+### Bug Fixes
+
+* correctly find Java LTS latestTag version strings ([#905](https://www.github.com/googleapis/release-please/issues/905)) ([3aa23f8](https://www.github.com/googleapis/release-please/commit/3aa23f8d4bf081da7e9631142ed9c780b8be0a42))
+
+## [11.12.0](https://www.github.com/googleapis/release-please/compare/v11.11.0...v11.12.0) (2021-05-11)
+
+
+### Features
+
+* allow overriding release label ([#900](https://www.github.com/googleapis/release-please/issues/900)) ([1af2623](https://www.github.com/googleapis/release-please/commit/1af26231857509244935034d68e3d031f2dbbebd))
+
+
+### Bug Fixes
+
+* **manifest:** node-workspace plugin respects release-as ([#901](https://www.github.com/googleapis/release-please/issues/901)) ([2d4ee9e](https://www.github.com/googleapis/release-please/commit/2d4ee9eaed8efb96a0a42ce989d37325d1722eed))
+
+## [11.11.0](https://www.github.com/googleapis/release-please/compare/v11.10.0...v11.11.0) (2021-05-04)
+
+
+### Features
+
+* add custom logger interface ([#884](https://www.github.com/googleapis/release-please/issues/884)) ([74ac982](https://www.github.com/googleapis/release-please/commit/74ac982e5603ae007d608aa9860f56c212b0111a))
+* **python:** support pyproject.toml ([#894](https://www.github.com/googleapis/release-please/issues/894)) ([38eb4cb](https://www.github.com/googleapis/release-please/commit/38eb4cbb029824976162ae3f1abcbda0f0546b95))
+
+## [11.10.0](https://www.github.com/googleapis/release-please/compare/v11.9.0...v11.10.0) (2021-05-03)
+
+
+### Features
+
+* add generic go releaser ([#890](https://www.github.com/googleapis/release-please/issues/890)) ([79cce57](https://www.github.com/googleapis/release-please/commit/79cce579ad256a162e221d76e70e45a351d795c7))
+
+
+### Bug Fixes
+
+* **release-as:** commits with Release-As footer now create release ([#891](https://www.github.com/googleapis/release-please/issues/891)) ([f722b0c](https://www.github.com/googleapis/release-please/commit/f722b0c679c6b7c5ba80f20ba88be1bb7484126e))
+
+## [11.9.0](https://www.github.com/googleapis/release-please/compare/v11.8.1...v11.9.0) (2021-04-28)
+
+
+### Features
+
+* **node:** update npm-shrinkwrap file ([#887](https://www.github.com/googleapis/release-please/issues/887)) ([1696c10](https://www.github.com/googleapis/release-please/commit/1696c104027e2fe69bb65d00eba0db109bb5de1d))
+
+### [11.8.1](https://www.github.com/googleapis/release-please/compare/v11.8.0...v11.8.1) (2021-04-23)
+
+
+### Bug Fixes
+
+* Java replacer should handle `-sp.1` version replacements ([#874](https://www.github.com/googleapis/release-please/issues/874)) ([81131e5](https://www.github.com/googleapis/release-please/commit/81131e5f5b5263b487216d7643b34c27ccd51e1f)), closes [#873](https://www.github.com/googleapis/release-please/issues/873)
+* **manifest:** dynamic importing does not work with build for action ([#871](https://www.github.com/googleapis/release-please/issues/871)) ([e702c35](https://www.github.com/googleapis/release-please/commit/e702c35cc4f7cfede39a42e921de3a6b01332cb1))
+* **octokit:** address regression in internal octokit types ([#880](https://www.github.com/googleapis/release-please/issues/880)) ([d32f114](https://www.github.com/googleapis/release-please/commit/d32f1148d2380a3040fd043ace2d8a08627cd2e7))
+
+## [11.8.0](https://www.github.com/googleapis/release-please/compare/v11.7.0...v11.8.0) (2021-04-19)
+
+
+### Features
+
+* **manifest:** node workspace package dependency updates ([#844](https://www.github.com/googleapis/release-please/issues/844)) ([9ebd422](https://www.github.com/googleapis/release-please/commit/9ebd422b6abd0d49e6d3d740d33bf1bbd58ec6a4))
+* **ocaml:** Add dune-project updater ([81422dc](https://www.github.com/googleapis/release-please/commit/81422dc7279d4999703a9c34ce1a559361be6953))
+
+
+### Bug Fixes
+
+* adjust patch rule for Java LTS strategy ([#857](https://www.github.com/googleapis/release-please/issues/857)) ([7f78dc5](https://www.github.com/googleapis/release-please/commit/7f78dc566a708ce3f98ba315685c79a37c4706f8))
+* **ocaml:** Avoid hardcoding changelogSections to allow configuration ([81422dc](https://www.github.com/googleapis/release-please/commit/81422dc7279d4999703a9c34ce1a559361be6953))
+* **ocaml:** Improve OCaml releaser for monorepos ([#867](https://www.github.com/googleapis/release-please/issues/867)) ([81422dc](https://www.github.com/googleapis/release-please/commit/81422dc7279d4999703a9c34ce1a559361be6953))
+* **ocaml:** Pass the path prefix when searching for files ([81422dc](https://www.github.com/googleapis/release-please/commit/81422dc7279d4999703a9c34ce1a559361be6953))
+
+## [11.7.0](https://www.github.com/googleapis/release-please/compare/v11.6.0...v11.7.0) (2021-04-09)
+
+
+### Features
+
+* add ability to specify extra files for releasers to consider ([#850](https://www.github.com/googleapis/release-please/issues/850)) ([f7079fd](https://www.github.com/googleapis/release-please/commit/f7079fd7bb07104e9ed249d870f7ae59b1cdf15a))
+
+## [11.6.0](https://www.github.com/googleapis/release-please/compare/v11.5.0...v11.6.0) (2021-04-07)
+
+
+### Features
+
+* allow "standard" pre 1.0.0 patch bumps ([#847](https://www.github.com/googleapis/release-please/issues/847)) ([a5e2cc2](https://www.github.com/googleapis/release-please/commit/a5e2cc2020c71b2bc0f61add2abf2d7fdbe8920e))
+
+
+### Bug Fixes
+
+* **manifest:** package paths sharing same prefix being shadowed in commit-split ([#848](https://www.github.com/googleapis/release-please/issues/848)) ([29ba3b5](https://www.github.com/googleapis/release-please/commit/29ba3b598a4862b3d15a490712cf383a8838b502))
+
+## [11.5.0](https://www.github.com/googleapis/release-please/compare/v11.4.1...v11.5.0) (2021-03-30)
+
+
+### Features
+
+* **manifest:** include default branch name in PR title ([#843](https://www.github.com/googleapis/release-please/issues/843)) ([16f00dc](https://www.github.com/googleapis/release-please/commit/16f00dc4562d370b217da81476fba4d42407c567))
+
+
+### Bug Fixes
+
+* **manifest:** split commits on exact package path prefix ([#842](https://www.github.com/googleapis/release-please/issues/842)) ([2728bfe](https://www.github.com/googleapis/release-please/commit/2728bfe73717490326b5f1121d7da8cdd88e18a3))
+
+### [11.4.1](https://www.github.com/googleapis/release-please/compare/v11.4.0...v11.4.1) (2021-03-25)
+
+
+### Bug Fixes
+
+* **java:** lts -> sp versioning numbers ([#837](https://www.github.com/googleapis/release-please/issues/837)) ([183b235](https://www.github.com/googleapis/release-please/commit/183b235798bfeedc0ee421d7cbd172efc91f1e12))
+* **manifest:** do not group changes under "." ([#841](https://www.github.com/googleapis/release-please/issues/841)) ([47b8b43](https://www.github.com/googleapis/release-please/commit/47b8b432d4c5e4130d47b1f9b97b61c19bdeff0e))
+
+## [11.4.0](https://www.github.com/googleapis/release-please/compare/v11.3.0...v11.4.0) (2021-03-24)
+
+
+### Features
+
+* **manifest:** add support for releasing root module ([#833](https://www.github.com/googleapis/release-please/issues/833)) ([7ec1037](https://www.github.com/googleapis/release-please/commit/7ec103725ab96eb869c9bb8b83538efdf2e482b6))
+
+
+### Bug Fixes
+
+* **deps:** update dependency type-fest to v1 ([#834](https://www.github.com/googleapis/release-please/issues/834)) ([f06894c](https://www.github.com/googleapis/release-please/commit/f06894ce84317230e3b86fe2005d306f12c43c2d))
+
+## [11.3.0](https://www.github.com/googleapis/release-please/compare/v11.2.1...v11.3.0) (2021-03-22)
+
+
+### Features
+
+* **manifest:** factory/cli integration ([#824](https://www.github.com/googleapis/release-please/issues/824)) ([f3aad4d](https://www.github.com/googleapis/release-please/commit/f3aad4d5aeff263f7427f3884125fae317fd1d3e))
+
+### [11.2.1](https://www.github.com/googleapis/release-please/compare/v11.2.0...v11.2.1) (2021-03-12)
+
+
+### Bug Fixes
+
+* **changelog:** monorepoTags links in changelog ([#822](https://www.github.com/googleapis/release-please/issues/822)) ([405ac9d](https://www.github.com/googleapis/release-please/commit/405ac9df779031ce60294d5f88ec11d698aae492))
+
+## [11.2.0](https://www.github.com/googleapis/release-please/compare/v11.1.1...v11.2.0) (2021-03-09)
+
+
+### Features
+
+* **java:** add LTS versioning scheme and releaser ([#810](https://www.github.com/googleapis/release-please/issues/810)) ([89e5bed](https://www.github.com/googleapis/release-please/commit/89e5bedf00cccc756dbbe6c61013a5a54a724be9))
+
+
+### Bug Fixes
+
+* associated pull requests should match merge commit sha ([#817](https://www.github.com/googleapis/release-please/issues/817)) ([c144f8b](https://www.github.com/googleapis/release-please/commit/c144f8b8dd090b6133e73546a03ce55ebf08b68b))
+* update templated tf versions ([#812](https://www.github.com/googleapis/release-please/issues/812)) ([d222746](https://www.github.com/googleapis/release-please/commit/d22274690c3a2117d620af76537b7e641e4734fd))
+
+### [11.1.1](https://www.github.com/googleapis/release-please/compare/v11.1.0...v11.1.1) (2021-03-01)
+
+
+### Bug Fixes
+
+* commit-split paths validation ([#806](https://www.github.com/googleapis/release-please/issues/806)) ([0b1da99](https://www.github.com/googleapis/release-please/commit/0b1da99c3c7e395f98c7625e2664845b58111a09))
+* **node:** PackageJson updater sets this.contents ([#803](https://www.github.com/googleapis/release-please/issues/803)) ([732e453](https://www.github.com/googleapis/release-please/commit/732e453e7f00c93bcc0e39c66dd600fb1e9386e6))
+
+## [11.1.0](https://www.github.com/googleapis/release-please/compare/v11.0.1...v11.1.0) (2021-02-24)
+
+
+### Features
+
+* support custom pull request title ([#784](https://www.github.com/googleapis/release-please/issues/784)) ([d34e069](https://www.github.com/googleapis/release-please/commit/d34e069b6c8262a69d97309791d3b371c4dbbb0d))
+
+
+### Bug Fixes
+
+* bug in Terraform version updater  ([#795](https://www.github.com/googleapis/release-please/issues/795)) ([24d5b8b](https://www.github.com/googleapis/release-please/commit/24d5b8bde7f8b3d261c7d010719f6b2f697ccb5f))
+
+### [11.0.1](https://www.github.com/googleapis/release-please/compare/v11.0.0...v11.0.1) (2021-02-23)
+
+
+### Bug Fixes
+
+* js-yaml should be a dependency not devDependency ([#792](https://www.github.com/googleapis/release-please/issues/792)) ([eaf031f](https://www.github.com/googleapis/release-please/commit/eaf031fb29ceb8ac7503c21bf730130fb29a2b95))
+
+## [11.0.0](https://www.github.com/googleapis/release-please/compare/v10.1.0...v11.0.0) (2021-02-23)
+
+
+### ⚠ BREAKING CHANGES
+
+* move changelogPath down to ReleasePR (#790)
+* move fork down to GitHub (#770)
+* factory.run becomes factory.call
+* remove GitHubRelease.labels in favor of ReleasePR.labels
+* normalize configuration accross classes (#763)
+* move latestTag logic to ReleasePR (#758)
+
+### Features
+
+* add async interator for searching commit history ([#759](https://www.github.com/googleapis/release-please/issues/759)) ([f42bab1](https://www.github.com/googleapis/release-please/commit/f42bab11d9d737d64f8b4a7184b58951fc6a9d44))
+* add latest-tag command which will print out the detected latest tag for a branch ([#765](https://www.github.com/googleapis/release-please/issues/765)) ([07e2969](https://www.github.com/googleapis/release-please/commit/07e29696c13b323ff8c79bfa350809f8d6b91230))
+* add support for helm ([#748](https://www.github.com/googleapis/release-please/issues/748)) ([c9fbf78](https://www.github.com/googleapis/release-please/commit/c9fbf78832c65425d5efdace2fc0f24233749f6e))
+* expose the release body to consumers ([#789](https://www.github.com/googleapis/release-please/issues/789)) ([6848e8e](https://www.github.com/googleapis/release-please/commit/6848e8e635a710925bdf78ca0b1eb246d7a1836d))
+* pull request title resource ([#780](https://www.github.com/googleapis/release-please/issues/780)) ([4e7f524](https://www.github.com/googleapis/release-please/commit/4e7f524d0ce2a9560998de57f8c0d3a14815b4d5))
+
+
+### Bug Fixes
+
+* **deps:** update dependency type-fest to ^0.21.0 ([#768](https://www.github.com/googleapis/release-please/issues/768)) ([eb68033](https://www.github.com/googleapis/release-please/commit/eb68033095777b1687275947c7117601ad2e333a))
+* do not change format of Python version files ([#782](https://www.github.com/googleapis/release-please/issues/782)) ([10f7ab9](https://www.github.com/googleapis/release-please/commit/10f7ab98ce1a277864a383959a6f7338985f0bfa))
+* find first associate pull request ([#764](https://www.github.com/googleapis/release-please/issues/764)) ([b277b89](https://www.github.com/googleapis/release-please/commit/b277b8909e78047797796c0428f545ce482a0b2a))
+* **github-release:** release name is packageName ([#757](https://www.github.com/googleapis/release-please/issues/757)) ([869f1a1](https://www.github.com/googleapis/release-please/commit/869f1a1ad7395dd6889033ddc103f99a310ac06b))
+* only add the target branch to PR title for non-default branches ([#781](https://www.github.com/googleapis/release-please/issues/781)) ([00ca2ad](https://www.github.com/googleapis/release-please/commit/00ca2ad9953baeb69f7ed28fc7958f7868ee127f))
+* **pagination:** looking for pending PRs had no pagination limit ([#791](https://www.github.com/googleapis/release-please/issues/791)) ([9b36d25](https://www.github.com/googleapis/release-please/commit/9b36d25451f988ec921b9abd54ff94fa8f5da295))
+* **release-pr:** update default initial version ([#776](https://www.github.com/googleapis/release-please/issues/776)) ([5f62443](https://www.github.com/googleapis/release-please/commit/5f624439cafe6702ac45d70ad39a2330258dfe03))
+
+
+### Code Refactoring
+
+* move changelogPath down to ReleasePR ([#790](https://www.github.com/googleapis/release-please/issues/790)) ([65c4147](https://www.github.com/googleapis/release-please/commit/65c41479c0a12c900b0850591f5223d436062e45))
+* move fork down to GitHub ([#770](https://www.github.com/googleapis/release-please/issues/770)) ([d25f490](https://www.github.com/googleapis/release-please/commit/d25f49028092602190535bd94c5b17d0e984a3bc))
+* move latestTag logic to ReleasePR ([#758](https://www.github.com/googleapis/release-please/issues/758)) ([746d1c8](https://www.github.com/googleapis/release-please/commit/746d1c893a95894420a5fe65706a438492e6605c))
+* normalize configuration accross classes ([#763](https://www.github.com/googleapis/release-please/issues/763)) ([44a3fd2](https://www.github.com/googleapis/release-please/commit/44a3fd2ef61b7083f6bbc88d20c51d57b4f7998e))
+* remove GitHubRelease.labels in favor of ReleasePR.labels ([44a3fd2](https://www.github.com/googleapis/release-please/commit/44a3fd2ef61b7083f6bbc88d20c51d57b4f7998e))
+* rename factory.run -> call ([#767](https://www.github.com/googleapis/release-please/issues/767)) ([24ecc3e](https://www.github.com/googleapis/release-please/commit/24ecc3e1a1e986cfdd10f069f4705ce869297787))
+
+## [10.1.0](https://www.github.com/googleapis/release-please/compare/v10.0.0...v10.1.0) (2021-02-08)
+
+
+### Features
+
+* add GitHub#commitsSince and GitHub#findMergeCommit ([#741](https://www.github.com/googleapis/release-please/issues/741)) ([27eb7b1](https://www.github.com/googleapis/release-please/commit/27eb7b13daedaf6d44374bdce9bc70ec14ab026d))
+* allow explicitly empty packageName when creating a release ([#743](https://www.github.com/googleapis/release-please/issues/743)) ([c3580c6](https://www.github.com/googleapis/release-please/commit/c3580c60c26af8c197f2ed3ee83736523c48f8fe))
+* tagging the release also comments on the release PR ([#751](https://www.github.com/googleapis/release-please/issues/751)) ([f78fc93](https://www.github.com/googleapis/release-please/commit/f78fc93d1a96ee419bc99e9b3b2a46abc507131f))
+
+## [10.0.0](https://www.github.com/googleapis/release-please/compare/v9.4.1...v10.0.0) (2021-02-03)
+
+
+### ⚠ BREAKING CHANGES
+
+* remove deprecated JavaAuthYoshi releaser (#736)
+* helpers in factory class renamed.
+* more options pulled to top level (some types changed in process)
+* GitHub release now uses "run" rather than "createRelease" to execute
+* drop unused proxy-key parameter.
+* **cli:** refactor factory/CLI to be more testable (#725)
+* removed per page parameter from GitHub#findMergedReleasePR and moved some internal helpers
+
+### Features
+
+* **cli:** refactor factory/CLI to be more testable ([#725](https://www.github.com/googleapis/release-please/issues/725)) ([713bfc5](https://www.github.com/googleapis/release-please/commit/713bfc591bef8c5df71de67e7aca44cbc0457344))
+* packageName parameter is now optional ([713bfc5](https://www.github.com/googleapis/release-please/commit/713bfc591bef8c5df71de67e7aca44cbc0457344))
+* support stable release branch names ([#720](https://www.github.com/googleapis/release-please/issues/720)) ([36cae96](https://www.github.com/googleapis/release-please/commit/36cae96eebd4ee00a00f9ccc6b7382f879d97a39))
+
+
+### Bug Fixes
+
+* remove deprecated JavaAuthYoshi releaser ([#736](https://www.github.com/googleapis/release-please/issues/736)) ([fc86755](https://www.github.com/googleapis/release-please/commit/fc867556c071218390d58d6d978d2a6687026d1b))
+
+
+### Code Refactoring
+
+* drop unused proxy-key parameter. ([713bfc5](https://www.github.com/googleapis/release-please/commit/713bfc591bef8c5df71de67e7aca44cbc0457344))
+* GitHub release now uses "run" rather than "createRelease" to execute ([713bfc5](https://www.github.com/googleapis/release-please/commit/713bfc591bef8c5df71de67e7aca44cbc0457344))
+* helpers in factory class renamed. ([713bfc5](https://www.github.com/googleapis/release-please/commit/713bfc591bef8c5df71de67e7aca44cbc0457344))
+* more options pulled to top level (some types changed in process) ([713bfc5](https://www.github.com/googleapis/release-please/commit/713bfc591bef8c5df71de67e7aca44cbc0457344))
+
+### [9.4.1](https://www.github.com/googleapis/release-please/compare/v9.4.0...v9.4.1) (2021-02-02)
+
+
+### Bug Fixes
+
+* **revert:** use resolove to find imports in tests [#715](https://www.github.com/googleapis/release-please/issues/715) ([#731](https://www.github.com/googleapis/release-please/issues/731)) ([ab74aea](https://www.github.com/googleapis/release-please/commit/ab74aea90dd131a994a192dacceefa8fd8414146))
+
+## [9.4.0](https://www.github.com/googleapis/release-please/compare/v9.3.0...v9.4.0) (2021-02-01)
+
+
+### Features
+
+* **github-release:** create a draft release ([#703](https://www.github.com/googleapis/release-please/issues/703)) ([bd83c03](https://www.github.com/googleapis/release-please/commit/bd83c032d2b678430e09e15283949bc8ee777471))
+
 ## [9.3.0](https://www.github.com/googleapis/release-please/compare/v9.2.0...v9.3.0) (2021-01-22)
 
 

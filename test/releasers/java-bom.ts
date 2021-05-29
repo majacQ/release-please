@@ -16,37 +16,16 @@ import {describe, it, afterEach} from 'mocha';
 
 import {expect} from 'chai';
 import {JavaBom} from '../../src/releasers/java-bom';
-import {readFileSync} from 'fs';
-import {resolve} from 'path';
-import * as snapshot from 'snap-shot-it';
 import * as suggester from 'code-suggester';
 import * as sinon from 'sinon';
-import {GitHubFileContents} from '../../src/github';
-import * as crypto from 'crypto';
-import {Commit} from '../../src/graphql-to-commits';
+import {GitHubFileContents, GitHub} from '../../src/github';
+import {buildGitHubFileContent} from './utils';
+import {buildMockCommit, stubSuggesterWithSnapshot} from '../helpers';
 
 const sandbox = sinon.createSandbox();
-const fixturesPath = './test/releasers/fixtures/java-bom';
 
 function buildFileContent(fixture: string): GitHubFileContents {
-  const content = readFileSync(resolve(fixturesPath, fixture), 'utf8').replace(
-    /\r\n/g,
-    '\n'
-  );
-  return {
-    content: Buffer.from(content, 'utf8').toString('base64'),
-    parsedContent: content,
-    // fake a consistent sha
-    sha: crypto.createHash('md5').update(content).digest('hex'),
-  };
-}
-
-function buildMockCommit(message: string): Commit {
-  return {
-    sha: crypto.createHash('md5').update(message).digest('hex'),
-    message,
-    files: [],
-  };
+  return buildGitHubFileContent('./test/releasers/fixtures/java-bom', fixture);
 }
 
 describe('JavaBom', () => {
@@ -54,17 +33,14 @@ describe('JavaBom', () => {
     sandbox.restore();
   });
   describe('run', () => {
-    it('creates a release PR', async () => {
+    it('creates a release PR', async function () {
       const releasePR = new JavaBom({
-        repoUrl: 'googleapis/java-cloud-bom',
-        releaseType: 'java-bom',
-        // not actually used by this type of repo.
+        github: new GitHub({owner: 'googleapis', repo: 'java-cloud-bom'}),
         packageName: 'java-cloud-bom',
-        apiUrl: 'https://api.github.com',
       });
 
       sandbox
-        .stub(releasePR.gh, 'getDefaultBranch')
+        .stub(releasePR.gh, 'getRepositoryDefaultBranch')
         .returns(Promise.resolve('master'));
 
       // No open release PRs, so create a new release PR
@@ -77,7 +53,7 @@ describe('JavaBom', () => {
         .returns(Promise.resolve(undefined));
 
       // Indicates that there are no PRs currently waiting to be released:
-      sandbox.stub(releasePR.gh, 'latestTag').returns(
+      sandbox.stub(releasePR, 'latestTag').returns(
         Promise.resolve({
           name: 'v0.123.4',
           sha: 'abc123',
@@ -129,38 +105,19 @@ describe('JavaBom', () => {
       // TODO: maybe assert which labels added
       sandbox.stub(releasePR.gh, 'addLabels');
 
-      // We stub the entire suggester API, asserting only that the
-      // the appropriate changes are proposed:
-      let expectedChanges = null;
-      sandbox.replace(
-        suggester,
-        'createPullRequest',
-        (_octokit, changes): Promise<number> => {
-          expectedChanges = [...(changes as Map<string, object>)]; // Convert map to key/value pairs.
-          return Promise.resolve(22);
-        }
-      );
+      stubSuggesterWithSnapshot(sandbox, this.test!.fullTitle());
       await releasePR.run();
-      snapshot(
-        JSON.stringify(expectedChanges, null, 2).replace(
-          /[0-9]{4}-[0-9]{2}-[0-9]{2}/,
-          '1983-10-10' // don't save a real date, this will break tests.
-        )
-      );
     });
 
-    it('creates a snapshot PR', async () => {
+    it('creates a snapshot PR', async function () {
       const releasePR = new JavaBom({
-        repoUrl: 'googleapis/java-cloud-bom',
-        releaseType: 'java-bom',
-        // not actually used by this type of repo.
+        github: new GitHub({owner: 'googleapis', repo: 'java-cloud-bom'}),
         packageName: 'java-cloud-bom',
-        apiUrl: 'https://api.github.com',
         snapshot: true,
       });
 
       sandbox
-        .stub(releasePR.gh, 'getDefaultBranch')
+        .stub(releasePR.gh, 'getRepositoryDefaultBranch')
         .returns(Promise.resolve('master'));
 
       // No open release PRs, so create a new release PR
@@ -173,7 +130,7 @@ describe('JavaBom', () => {
         .returns(Promise.resolve(undefined));
 
       // Indicates that there are no PRs currently waiting to be released:
-      sandbox.stub(releasePR.gh, 'latestTag').returns(
+      sandbox.stub(releasePR, 'latestTag').returns(
         Promise.resolve({
           name: 'v0.123.4',
           sha: 'abc123',
@@ -225,38 +182,19 @@ describe('JavaBom', () => {
       // TODO: maybe assert which labels added
       sandbox.stub(releasePR.gh, 'addLabels');
 
-      // We stub the entire suggester API, asserting only that the
-      // the appropriate changes are proposed:
-      let expectedChanges = null;
-      sandbox.replace(
-        suggester,
-        'createPullRequest',
-        (_octokit, changes): Promise<number> => {
-          expectedChanges = [...(changes as Map<string, object>)]; // Convert map to key/value pairs.
-          return Promise.resolve(22);
-        }
-      );
+      stubSuggesterWithSnapshot(sandbox, this.test!.fullTitle());
       await releasePR.run();
-      snapshot(
-        JSON.stringify(expectedChanges, null, 2).replace(
-          /[0-9]{4}-[0-9]{2}-[0-9]{2}/,
-          '1983-10-10' // don't save a real date, this will break tests.
-        )
-      );
     });
 
     it('ignores a snapshot release if no snapshot needed', async () => {
       const releasePR = new JavaBom({
-        repoUrl: 'googleapis/java-cloud-bom',
-        releaseType: 'java-bom',
-        // not actually used by this type of repo.
+        github: new GitHub({owner: 'googleapis', repo: 'java-cloud-bom'}),
         packageName: 'java-cloud-bom',
-        apiUrl: 'https://api.github.com',
         snapshot: true,
       });
 
       sandbox
-        .stub(releasePR.gh, 'getDefaultBranch')
+        .stub(releasePR.gh, 'getRepositoryDefaultBranch')
         .returns(Promise.resolve('master'));
 
       sandbox
@@ -282,17 +220,15 @@ describe('JavaBom', () => {
       await releasePR.run();
     });
 
-    it('creates a snapshot PR if an explicit release is requested, but a snapshot is needed', async () => {
+    it('creates a snapshot PR if an explicit release is requested, but a snapshot is needed', async function () {
       const releasePR = new JavaBom({
-        repoUrl: 'googleapis/java-cloud-bom',
-        releaseType: 'java-bom',
-        // not actually used by this type of repo.
+        github: new GitHub({owner: 'googleapis', repo: 'java-cloud-bom'}),
         packageName: 'java-cloud-bom',
-        apiUrl: 'https://api.github.com',
         snapshot: false,
       });
+
       sandbox
-        .stub(releasePR.gh, 'getDefaultBranch')
+        .stub(releasePR.gh, 'getRepositoryDefaultBranch')
         .returns(Promise.resolve('master'));
 
       // No open release PRs, so create a new release PR
@@ -305,7 +241,7 @@ describe('JavaBom', () => {
         .returns(Promise.resolve(undefined));
 
       // Indicates that there are no PRs currently waiting to be released:
-      sandbox.stub(releasePR.gh, 'latestTag').returns(
+      sandbox.stub(releasePR, 'latestTag').returns(
         Promise.resolve({
           name: 'v0.123.4',
           sha: 'abc123',
@@ -357,37 +293,18 @@ describe('JavaBom', () => {
       // TODO: maybe assert which labels added
       sandbox.stub(releasePR.gh, 'addLabels');
 
-      // We stub the entire suggester API, asserting only that the
-      // the appropriate changes are proposed:
-      let expectedChanges = null;
-      sandbox.replace(
-        suggester,
-        'createPullRequest',
-        (_octokit, changes): Promise<number> => {
-          expectedChanges = [...(changes as Map<string, object>)]; // Convert map to key/value pairs.
-          return Promise.resolve(22);
-        }
-      );
+      stubSuggesterWithSnapshot(sandbox, this.test!.fullTitle());
       await releasePR.run();
-      snapshot(
-        JSON.stringify(expectedChanges, null, 2).replace(
-          /[0-9]{4}-[0-9]{2}-[0-9]{2}/,
-          '1983-10-10' // don't save a real date, this will break tests.
-        )
-      );
     });
 
-    it('merges conventional commit messages', async () => {
+    it('merges conventional commit messages', async function () {
       const releasePR = new JavaBom({
-        repoUrl: 'googleapis/java-cloud-bom',
-        releaseType: 'java-bom',
-        // not actually used by this type of repo.
+        github: new GitHub({owner: 'googleapis', repo: 'java-cloud-bom'}),
         packageName: 'java-cloud-bom',
-        apiUrl: 'https://api.github.com',
       });
 
       sandbox
-        .stub(releasePR.gh, 'getDefaultBranch')
+        .stub(releasePR.gh, 'getRepositoryDefaultBranch')
         .returns(Promise.resolve('master'));
 
       // No open release PRs, so create a new release PR
@@ -400,7 +317,7 @@ describe('JavaBom', () => {
         .returns(Promise.resolve(undefined));
 
       // Indicates that there are no PRs currently waiting to be released:
-      sandbox.stub(releasePR.gh, 'latestTag').returns(
+      sandbox.stub(releasePR, 'latestTag').returns(
         Promise.resolve({
           name: 'v0.123.4',
           sha: 'abc123',
@@ -450,24 +367,8 @@ describe('JavaBom', () => {
       // TODO: maybe assert which labels added
       sandbox.stub(releasePR.gh, 'addLabels');
 
-      // We stub the entire suggester API, asserting only that the
-      // the appropriate changes are proposed:
-      let expectedChanges = null;
-      sandbox.replace(
-        suggester,
-        'createPullRequest',
-        (_octokit, changes): Promise<number> => {
-          expectedChanges = [...(changes as Map<string, object>)]; // Convert map to key/value pairs.
-          return Promise.resolve(22);
-        }
-      );
+      stubSuggesterWithSnapshot(sandbox, this.test!.fullTitle());
       await releasePR.run();
-      snapshot(
-        JSON.stringify(expectedChanges, null, 2).replace(
-          /[0-9]{4}-[0-9]{2}-[0-9]{2}/,
-          '1983-10-10' // don't save a real date, this will break tests.
-        )
-      );
     });
   });
 

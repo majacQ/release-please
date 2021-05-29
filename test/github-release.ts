@@ -12,511 +12,700 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import {readFileSync} from 'fs';
-import {resolve} from 'path';
-import * as snapshot from 'snap-shot-it';
-import {describe, it} from 'mocha';
+import * as sinon from 'sinon';
+import {describe, it, afterEach} from 'mocha';
 import {expect} from 'chai';
 import * as nock from 'nock';
-import {strictEqual} from 'assert';
+import * as crypto from 'crypto';
+import {strictEqual, ok} from 'assert';
 nock.disableNetConnect();
 
 import {GitHubRelease} from '../src/github-release';
+import {GitHubFileContents, GitHub} from '../src/github';
+import {ReleasePR, JavaYoshi} from '../src';
+import {GoYoshi} from '../src/releasers/go-yoshi';
+import {Node} from '../src/releasers/node';
+import {JavaLTS} from '../src/releasers/java-lts';
 
-const fixturesPath = './test/fixtures';
+const sandbox = sinon.createSandbox();
 
-// eslint-disable-next-line @typescript-eslint/no-var-requires
-const repoInfo = require(resolve('./test/fixtures/repo-get-2.json'));
+function buildFileContent(content: string): GitHubFileContents {
+  return {
+    content: Buffer.from(content, 'utf8').toString('base64'),
+    parsedContent: content,
+    // fake a consistent sha
+    sha: crypto.createHash('md5').update(content).digest('hex'),
+  };
+}
 
 describe('GitHubRelease', () => {
-  describe('createRelease', () => {
-    it('creates and labels release on GitHub', async () => {
-      const release = new GitHubRelease({
-        label: 'autorelease: pending',
-        repoUrl: 'googleapis/foo',
-        packageName: 'foo',
-        apiUrl: 'https://api.github.com',
-      });
-      const requests = nock('https://api.github.com')
-        // check for default branch
-        .get('/repos/googleapis/foo')
-        .reply(200, repoInfo)
-        .get(
-          '/repos/googleapis/foo/pulls?state=closed&per_page=50&sort=updated&direction=desc'
-        )
-        .reply(200, [
-          {
-            labels: [{name: 'autorelease: pending'}],
-            head: {
-              label: 'head:release-v1.0.3',
-            },
-            base: {
-              label: 'googleapis:main',
-            },
-            number: 1,
-            merged_at: new Date().toISOString(),
-          },
-        ])
-        .get('/repos/googleapis/foo/contents/CHANGELOG.md?ref=refs/heads/main')
-        .reply(200, {
-          content: Buffer.from('#Changelog\n\n## v1.0.3\n\n* entry', 'utf8'),
-        })
-        .post(
-          '/repos/googleapis/foo/releases',
-          (body: {[key: string]: string}) => {
-            snapshot(body);
-            return true;
-          }
-        )
-        .reply(200, {tag_name: 'v1.0.3', draft: false})
-        .post(
-          '/repos/googleapis/foo/issues/1/labels',
-          (body: {[key: string]: string}) => {
-            snapshot(body);
-            return true;
-          }
-        )
-        .reply(200)
-        .delete(
-          '/repos/googleapis/foo/issues/1/labels/autorelease%3A%20pending'
-        )
-        .reply(200);
+  afterEach(() => {
+    sandbox.restore();
+  });
+  function mockGithubCommon(params: {
+    github: GitHub;
+    prHead: string;
+    prTitle: string;
+    changeLog?: string;
+    version?: string;
+    mockLabelsAndComment?: boolean;
+  }) {
+    const {github, prHead, prTitle, changeLog, version} = params;
+    const mock = sandbox.mock(github);
+    mock.expects('getRepositoryDefaultBranch').once().resolves('main');
+    mock
+      .expects('findMergedPullRequests')
+      .once()
+      .resolves([
+        {
+          sha: 'abc123',
+          number: 1,
+          baseRefName: 'main',
+          headRefName: prHead,
+          labels: ['autorelease: pending'],
+          title: prTitle,
+          body: 'Some release notes',
+        },
+      ]);
+    mock
+      .expects('getFileContentsOnBranch')
+      .withExactArgs(changeLog ?? 'CHANGELOG.md', 'main')
+      .once()
+      .resolves(
+        buildFileContent(`#Changelog\n\n## v${version ?? '1.0.3'}\n\n* entry`)
+      );
+    return mock;
+  }
 
-      const created = await release.createRelease();
+  function mockGithubLabelsAndComment(
+    mock: sinon.SinonMock,
+    mockLabelsAndComment: boolean,
+    releaseLabel = 'autorelease: tagged'
+  ) {
+    if (mockLabelsAndComment) {
+      mock
+        .expects('commentOnIssue')
+        .withExactArgs(
+          ':robot: Release is at https://release.url :sunflower:',
+          1
+        )
+        .once()
+        .resolves();
+      mock
+        .expects('addLabels')
+        .withExactArgs([releaseLabel], 1)
+        .once()
+        .resolves();
+      mock
+        .expects('removeLabels')
+        .withExactArgs(['autorelease: pending'], 1)
+        .once()
+        .resolves();
+    } else {
+      mock.expects('commentOnIssue').never();
+      mock.expects('addLabels').never();
+      mock.expects('removeLabels').never();
+    }
+  }
+
+  describe('run', () => {
+    it('creates and labels release on GitHub', async () => {
+      const github = new GitHub({owner: 'googleapis', repo: 'foo'});
+      const mock = mockGithubCommon({
+        github,
+        prHead: 'release-v1.0.3',
+        prTitle: 'Release v1.0.3',
+      });
+      mockGithubLabelsAndComment(mock, true);
+      mock
+        .expects('createRelease')
+        .once()
+        .withExactArgs('foo', 'v1.0.3', 'abc123', '\n* entry', false)
+        .once()
+        .resolves({
+          name: 'foo v1.0.3',
+          tag_name: 'v1.0.3',
+          draft: false,
+          html_url: 'https://release.url',
+          upload_url: 'https://upload.url/',
+          body: '\n* entry',
+        });
+
+      const releasePR = new ReleasePR({github, packageName: 'foo'});
+      const releaser = new GitHubRelease({github, releasePR});
+      const created = await releaser.run();
+      mock.verify();
+
+      strictEqual(created!.name, 'foo v1.0.3');
       strictEqual(created!.tag_name, 'v1.0.3');
       strictEqual(created!.major, 1);
       strictEqual(created!.minor, 0);
       strictEqual(created!.patch, 3);
       strictEqual(created!.draft, false);
-      requests.done();
+    });
+
+    it('creates and labels release on GitHub with invalid semver', async () => {
+      const github = new GitHub({owner: 'googleapis', repo: 'foo'});
+      const mock = mockGithubCommon({
+        github,
+        prHead: 'release-v1A.B.C',
+        prTitle: 'Release v1A.B.C',
+        version: '1A.B.C',
+      });
+      mockGithubLabelsAndComment(mock, true);
+      mock
+        .expects('createRelease')
+        .withExactArgs('foo', 'v1A.B.C', 'abc123', '\n* entry', false)
+        .once()
+        .resolves({
+          name: 'foo v1A.B.C',
+          tag_name: 'v1A.B.C',
+          draft: false,
+          html_url: 'https://release.url',
+          upload_url: 'https://upload.url/',
+          body: '\n* entry',
+        });
+
+      const releasePR = new ReleasePR({github, packageName: 'foo'});
+      const releaser = new GitHubRelease({github, releasePR});
+      const created = await releaser.run();
+
+      expect(created).to.be.undefined;
     });
 
     it('creates a draft release', async () => {
-      const release = new GitHubRelease({
-        label: 'autorelease: pending',
-        repoUrl: 'googleapis/foo',
-        packageName: 'foo',
-        apiUrl: 'https://api.github.com',
-        draft: true,
+      const github = new GitHub({owner: 'googleapis', repo: 'foo'});
+      const mock = mockGithubCommon({
+        github,
+        prHead: 'release-v1.0.3',
+        prTitle: 'Release v1.0.3',
       });
-      const requests = nock('https://api.github.com')
-        // check for default branch
-        .get('/repos/googleapis/foo')
-        .reply(200, repoInfo)
-        .get(
-          '/repos/googleapis/foo/pulls?state=closed&per_page=50&sort=updated&direction=desc'
-        )
-        .reply(200, [
-          {
-            labels: [{name: 'autorelease: pending'}],
-            head: {
-              label: 'head:release-v1.0.3',
-            },
-            base: {
-              label: 'googleapis:main',
-            },
-            number: 1,
-            merged_at: new Date().toISOString(),
-          },
-        ])
-        .get('/repos/googleapis/foo/contents/CHANGELOG.md?ref=refs/heads/main')
-        .reply(200, {
-          content: Buffer.from('#Changelog\n\n## v1.0.3\n\n* entry', 'utf8'),
-        })
-        .post(
-          '/repos/googleapis/foo/releases',
-          (body: {[key: string]: string}) => {
-            snapshot(body);
-            return true;
-          }
-        )
-        .reply(200, {tag_name: 'v1.0.3', draft: true})
-        .post(
-          '/repos/googleapis/foo/issues/1/labels',
-          (body: {[key: string]: string}) => {
-            snapshot(body);
-            return true;
-          }
-        )
-        .reply(200)
-        .delete(
-          '/repos/googleapis/foo/issues/1/labels/autorelease%3A%20pending'
-        )
-        .reply(200);
+      mockGithubLabelsAndComment(mock, true);
+      mock
+        .expects('createRelease')
+        .withExactArgs('foo', 'v1.0.3', 'abc123', '\n* entry', true)
+        .once()
+        .resolves({
+          name: 'foo v1.0.3',
+          tag_name: 'v1.0.3',
+          draft: true,
+          html_url: 'https://release.url',
+          upload_url: 'https://upload.url/',
+          body: '\n* entry',
+        });
 
-      const created = await release.createRelease();
-      strictEqual(created!.tag_name, 'v1.0.3');
-      strictEqual(created!.major, 1);
-      strictEqual(created!.minor, 0);
-      strictEqual(created!.patch, 3);
+      const releasePR = new ReleasePR({github, packageName: 'foo'});
+      const releaser = new GitHubRelease({github, releasePR, draft: true});
+      const created = await releaser.run();
+
       strictEqual(created!.draft, true);
-      requests.done();
     });
 
     it('creates releases for submodule in monorepo', async () => {
-      const release = new GitHubRelease({
-        label: 'autorelease: pending',
-        repoUrl: 'googleapis/foo',
-        packageName: 'bigquery',
+      const github = new GitHub({owner: 'googleapis', repo: 'foo'});
+      const mock = mockGithubCommon({
+        github,
+        prHead: 'release-bigquery-v1.0.3',
+        prTitle: 'Release bigquery v1.0.3',
+        changeLog: 'bigquery/CHANGES.md',
+      });
+      mockGithubLabelsAndComment(mock, true);
+      mock
+        .expects('createRelease')
+        .withExactArgs(
+          'bigquery',
+          'bigquery/v1.0.3',
+          'abc123',
+          '\n* entry',
+          false
+        )
+        .once()
+        .resolves({
+          name: 'bigquery bigquery/v1.0.3',
+          tag_name: 'bigquery/v1.0.3',
+          draft: false,
+          html_url: 'https://release.url',
+          upload_url: 'https://upload.url/',
+          body: '\n* entry',
+        });
+
+      const releasePR = new GoYoshi({
+        github,
         path: 'bigquery',
+        packageName: 'bigquery',
         monorepoTags: true,
-        releaseType: 'go-yoshi',
-        apiUrl: 'https://api.github.com',
         changelogPath: 'CHANGES.md',
       });
-      const requests = nock('https://api.github.com')
-        // check for default branch
-        .get('/repos/googleapis/foo')
-        .reply(200, repoInfo)
-        .get(
-          '/repos/googleapis/foo/pulls?state=closed&per_page=50&sort=updated&direction=desc'
-        )
-        .reply(200, [
-          {
-            labels: [{name: 'autorelease: pending'}],
-            head: {
-              label: 'head:release-bigquery-v1.0.3',
-            },
-            base: {
-              label: 'googleapis:main',
-            },
-            number: 1,
-            merged_at: new Date().toISOString(),
-          },
-        ])
-        .get(
-          '/repos/googleapis/foo/contents/bigquery%2FCHANGES.md?ref=refs/heads/main'
-        )
-        .reply(200, {
-          content: Buffer.from('#Changelog\n\n## v1.0.3\n\n* entry', 'utf8'),
-        })
-        .post(
-          '/repos/googleapis/foo/releases',
-          (body: {[key: string]: string}) => {
-            snapshot(body);
-            return true;
-          }
-        )
-        .reply(200, {tag_name: 'bigquery/v1.0.3'})
-        .post(
-          '/repos/googleapis/foo/issues/1/labels',
-          (body: {[key: string]: string}) => {
-            snapshot(body);
-            return true;
-          }
-        )
-        .reply(200)
-        .delete(
-          '/repos/googleapis/foo/issues/1/labels/autorelease%3A%20pending'
-        )
-        .reply(200);
+      const release = new GitHubRelease({
+        github,
+        releasePR,
+      });
+      const created = await release.run();
 
-      const created = await release.createRelease();
+      mock.verify();
+      expect(created).to.not.be.undefined;
+      strictEqual(created!.name, 'bigquery bigquery/v1.0.3');
       strictEqual(created!.tag_name, 'bigquery/v1.0.3');
       strictEqual(created!.major, 1);
       strictEqual(created!.minor, 0);
       strictEqual(created!.patch, 3);
-      requests.done();
     });
 
     it('supports submodules in nested folders', async () => {
-      const release = new GitHubRelease({
+      const github = new GitHub({owner: 'googleapis', repo: 'foo'});
+      const mock = mockGithubCommon({
+        github,
+        prHead: 'release-foo-v1.0.3',
+        prTitle: 'Release foo v1.0.3',
+        changeLog: 'src/apis/foo/CHANGES.md',
+      });
+      mockGithubLabelsAndComment(mock, true);
+      mock
+        .expects('createRelease')
+        .withExactArgs('foo', 'foo/v1.0.3', 'abc123', '\n* entry', false)
+        .once()
+        .resolves({
+          name: 'foo foo/v1.0.3',
+          tag_name: 'foo/v1.0.3',
+          draft: false,
+          html_url: 'https://release.url',
+          upload_url: 'https://upload.url/',
+          body: '\n* entry',
+        });
+
+      const releasePR = new GoYoshi({
+        github,
         path: 'src/apis/foo',
-        label: 'autorelease: pending',
-        repoUrl: 'googleapis/foo',
         packageName: 'foo',
         monorepoTags: true,
-        releaseType: 'go-yoshi',
-        apiUrl: 'https://api.github.com',
         changelogPath: 'CHANGES.md',
       });
-      const requests = nock('https://api.github.com')
-        // check for default branch
-        .get('/repos/googleapis/foo')
-        .reply(200, repoInfo)
-        .get(
-          '/repos/googleapis/foo/pulls?state=closed&per_page=50&sort=updated&direction=desc'
-        )
-        .reply(200, [
-          {
-            labels: [{name: 'autorelease: pending'}],
-            head: {
-              label: 'head:release-foo-v1.0.3',
-            },
-            base: {
-              label: 'googleapis:main',
-            },
-            number: 1,
-            merged_at: new Date().toISOString(),
-          },
-        ])
-        .get(
-          '/repos/googleapis/foo/contents/src%2Fapis%2Ffoo%2FCHANGES.md?ref=refs/heads/main'
-        )
-        .reply(200, {
-          content: Buffer.from('#Changelog\n\n## v1.0.3\n\n* entry', 'utf8'),
-        })
-        .post(
-          '/repos/googleapis/foo/releases',
-          (body: {[key: string]: string}) => {
-            snapshot(body);
-            return true;
-          }
-        )
-        .reply(200, {tag_name: 'foo/v1.0.3'})
-        .post(
-          '/repos/googleapis/foo/issues/1/labels',
-          (body: {[key: string]: string}) => {
-            snapshot(body);
-            return true;
-          }
-        )
-        .reply(200)
-        .delete(
-          '/repos/googleapis/foo/issues/1/labels/autorelease%3A%20pending'
-        )
-        .reply(200);
+      const release = new GitHubRelease({
+        github,
+        releasePR,
+      });
+      const created = await release.run();
 
-      const created = await release.createRelease();
+      mock.verify();
+      strictEqual(created!.name, 'foo foo/v1.0.3');
       strictEqual(created!.tag_name, 'foo/v1.0.3');
-      requests.done();
     });
 
     it('attempts to guess package name for submodule release', async () => {
-      const release = new GitHubRelease({
-        path: 'src/apis/foo',
-        label: 'autorelease: pending',
-        repoUrl: 'googleapis/foo',
-        apiUrl: 'https://api.github.com',
-        monorepoTags: true,
-        releaseType: 'node',
+      const github = new GitHub({owner: 'googleapis', repo: 'foo'});
+      const mock = mockGithubCommon({
+        github,
+        prHead: 'release-foo-v1.0.3',
+        prTitle: 'Release foo v1.0.3',
+        changeLog: 'src/apis/foo/CHANGELOG.md',
       });
-      const requests = nock('https://api.github.com')
-        // check for default branch
-        .get('/repos/googleapis/foo')
-        .reply(200, repoInfo)
-        .get(
-          '/repos/googleapis/foo/pulls?state=closed&per_page=50&sort=updated&direction=desc'
+      mockGithubLabelsAndComment(mock, true);
+      mock
+        .expects('getFileContentsOnBranch')
+        .withExactArgs('src/apis/foo/package.json', 'main')
+        .once()
+        .resolves(buildFileContent('{"name": "@google-cloud/foo"}'));
+      mock
+        .expects('createRelease')
+        .withExactArgs(
+          '@google-cloud/foo',
+          'foo-v1.0.3',
+          'abc123',
+          '\n* entry',
+          false
         )
-        .reply(200, [
-          {
-            labels: [{name: 'autorelease: pending'}],
-            head: {
-              label: 'head:release-foo-v1.0.3',
-            },
-            base: {
-              label: 'googleapis:main',
-            },
-            number: 1,
-            merged_at: new Date().toISOString(),
-          },
-        ])
-        .get(
-          '/repos/googleapis/foo/contents/src%2Fapis%2Ffoo%2Fpackage.json?ref=refs/heads/main'
-        )
-        .reply(200, {
-          content: Buffer.from('{"name": "@google-cloud/foo"}', 'utf8'),
-        })
-        .get(
-          '/repos/googleapis/foo/contents/src%2Fapis%2Ffoo%2FCHANGELOG.md?ref=refs/heads/main'
-        )
-        .reply(200, {
-          content: Buffer.from('#Changelog\n\n## v1.0.3\n\n* entry', 'utf8'),
-        })
-        .post(
-          '/repos/googleapis/foo/releases',
-          (body: {[key: string]: string}) => {
-            snapshot(body);
-            return true;
-          }
-        )
-        .reply(200, {tag_name: 'v1.0.3'})
-        .post(
-          '/repos/googleapis/foo/issues/1/labels',
-          (body: {[key: string]: string}) => {
-            snapshot(body);
-            return true;
-          }
-        )
-        .reply(200)
-        .delete(
-          '/repos/googleapis/foo/issues/1/labels/autorelease%3A%20pending'
-        )
-        .reply(200);
-      const created = await release.createRelease();
-      strictEqual(created!.tag_name, 'v1.0.3');
-      requests.done();
+        .once()
+        .resolves({
+          name: '@google-cloud/foo foo-v1.0.3',
+          tag_name: 'foo-v1.0.3',
+          draft: false,
+          html_url: 'https://release.url',
+          upload_url: 'https://upload.url/',
+          body: '\n* entry',
+        });
+
+      const releasePR = new Node({
+        github,
+        path: 'src/apis/foo',
+        monorepoTags: true,
+      });
+      const release = new GitHubRelease({github, releasePR});
+      const created = await release.run();
+
+      mock.verify();
+      expect(created).to.not.be.undefined;
+      strictEqual(created!.name, '@google-cloud/foo foo-v1.0.3');
+      strictEqual(created!.tag_name, 'foo-v1.0.3');
     });
 
     it('attempts to guess package name for release', async () => {
-      const release = new GitHubRelease({
-        label: 'autorelease: pending',
-        repoUrl: 'googleapis/foo',
-        apiUrl: 'https://api.github.com',
-        releaseType: 'node',
+      const github = new GitHub({owner: 'googleapis', repo: 'foo'});
+      const mock = mockGithubCommon({
+        github,
+        prHead: 'release-v1.0.3',
+        prTitle: 'Release v1.0.3',
       });
-      const requests = nock('https://api.github.com')
-        // check for default branch
-        .get('/repos/googleapis/foo')
-        .reply(200, repoInfo)
-        .get(
-          '/repos/googleapis/foo/pulls?state=closed&per_page=50&sort=updated&direction=desc'
+      mockGithubLabelsAndComment(mock, true);
+      mock
+        .expects('getFileContentsOnBranch')
+        .withExactArgs('package.json', 'main')
+        .once()
+        .resolves(buildFileContent('{"name": "@google-cloud/foo"}'));
+      mock
+        .expects('createRelease')
+        .withExactArgs(
+          '@google-cloud/foo',
+          'v1.0.3',
+          'abc123',
+          '\n* entry',
+          false
         )
-        .reply(200, [
-          {
-            labels: [{name: 'autorelease: pending'}],
-            head: {
-              label: 'head:release-v1.0.3',
-            },
-            base: {
-              label: 'googleapis:main',
-            },
-            number: 1,
-            merged_at: new Date().toISOString(),
-          },
-        ])
-        .get('/repos/googleapis/foo/contents/package.json?ref=refs/heads/main')
-        .reply(200, {
-          content: Buffer.from('{"name": "@google-cloud/foo"}', 'utf8'),
-        })
-        .get('/repos/googleapis/foo/contents/CHANGELOG.md?ref=refs/heads/main')
-        .reply(200, {
-          content: Buffer.from('#Changelog\n\n## v1.0.3\n\n* entry', 'utf8'),
-        })
-        .post(
-          '/repos/googleapis/foo/releases',
-          (body: {[key: string]: string}) => {
-            snapshot(body);
-            return true;
-          }
-        )
-        .reply(200, {tag_name: 'v1.0.3'})
-        .post(
-          '/repos/googleapis/foo/issues/1/labels',
-          (body: {[key: string]: string}) => {
-            snapshot(body);
-            return true;
-          }
-        )
-        .reply(200)
-        .delete(
-          '/repos/googleapis/foo/issues/1/labels/autorelease%3A%20pending'
-        )
-        .reply(200);
-      const created = await release.createRelease();
-      strictEqual(created!.tag_name, 'v1.0.3');
-      requests.done();
-    });
-
-    it('errors when no packageName (no lookupPackageName impl: python)', async () => {
-      const release = new GitHubRelease({
-        label: 'autorelease: pending',
-        repoUrl: 'googleapis/foo',
-        apiUrl: 'https://api.github.com',
-        releaseType: 'python',
-      });
-      let failed = true;
-      try {
-        await release.createRelease();
-        failed = false;
-      } catch (error) {
-        expect(error.message).to.equal(
-          'could not determine package name for release repo = googleapis/foo'
-        );
-      }
-      expect(failed).to.be.true;
-    });
-
-    it('errors when no packageName (lookupPackageName impl: node)', async () => {
-      const release = new GitHubRelease({
-        label: 'autorelease: pending',
-        repoUrl: 'googleapis/foo',
-        apiUrl: 'https://api.github.com',
-        releaseType: 'node',
-      });
-      const requests = nock('https://api.github.com')
-        .get('/repos/googleapis/foo')
-        .reply(200, repoInfo)
-        .get('/repos/googleapis/foo/contents/package.json?ref=refs/heads/main')
-        .reply(200, {
-          content: Buffer.from('{"no-the-name": "@google-cloud/foo"}', 'utf8'),
+        .once()
+        .resolves({
+          name: '@google-cloud/foo v1.0.3',
+          tag_name: 'v1.0.3',
+          draft: false,
+          html_url: 'https://release.url',
+          upload_url: 'https://upload.url/',
+          body: '\n* entry',
         });
+
+      const releasePR = new Node({github});
+      const release = new GitHubRelease({github, releasePR});
+      const created = await release.run();
+
+      mock.verify();
+      strictEqual(created!.name, '@google-cloud/foo v1.0.3');
+      strictEqual(created!.tag_name, 'v1.0.3');
+    });
+
+    it('empty packageName ok (non-monorepo)', async () => {
+      const github = new GitHub({owner: 'googleapis', repo: 'foo'});
+      const mock = mockGithubCommon({
+        github,
+        prHead: 'release-v1.0.3',
+        prTitle: 'Release v1.0.3',
+      });
+      mockGithubLabelsAndComment(mock, true);
+      mock
+        .expects('createRelease')
+        .once()
+        .withExactArgs('', 'v1.0.3', 'abc123', '\n* entry', false)
+        .once()
+        .resolves({
+          name: 'v1.0.3',
+          tag_name: 'v1.0.3',
+          draft: false,
+          html_url: 'https://release.url',
+          upload_url: 'https://upload.url/',
+          body: '\n* entry',
+        });
+
+      const releasePR = new ReleasePR({github});
+      const releaser = new GitHubRelease({github, releasePR});
+      const created = await releaser.run();
+
+      mock.verify();
+      strictEqual(created!.name, 'v1.0.3');
+      strictEqual(created!.tag_name, 'v1.0.3');
+    });
+
+    it('empty packageName not ok (monorepo)', async () => {
+      const github = new GitHub({owner: 'googleapis', repo: 'foo'});
+      const releasePR = new ReleasePR({github, monorepoTags: true});
+      const release = new GitHubRelease({github, releasePR});
       let failed = true;
       try {
-        await release.createRelease();
+        await release.run();
         failed = false;
       } catch (error) {
         expect(error.message).to.equal(
-          'could not determine package name for release repo = googleapis/foo'
+          'package-name required for monorepo releases'
         );
       }
       expect(failed).to.be.true;
-      requests.done();
+    });
+
+    it('parses version from PR title (detectReleaseVersionFromTitle impl: base)', async () => {
+      const github = new GitHub({owner: 'googleapis', repo: 'foo'});
+      const mock = mockGithubCommon({
+        github,
+        prHead: 'release-please/branches/main',
+        prTitle: 'chore: release 1.0.3',
+      });
+      mockGithubLabelsAndComment(mock, true);
+      mock
+        .expects('createRelease')
+        .withExactArgs('foo', 'v1.0.3', 'abc123', '\n* entry', false)
+        .once()
+        .resolves({
+          name: 'foo v1.0.3',
+          tag_name: 'v1.0.3',
+          draft: false,
+          html_url: 'https://release.url',
+          upload_url: 'https://upload.url/',
+          body: '\n* entry',
+        });
+      const releasePR = new ReleasePR({github, packageName: 'foo'});
+      const release = new GitHubRelease({github, releasePR});
+      const created = await release.run();
+
+      mock.verify();
+      expect(created).to.not.be.undefined;
+      strictEqual(created!.name, 'foo v1.0.3');
+      strictEqual(created!.tag_name, 'v1.0.3');
+      strictEqual(created!.major, 1);
+      strictEqual(created!.minor, 0);
+      strictEqual(created!.patch, 3);
+      strictEqual(created!.draft, false);
+    });
+
+    it('parses version from PR title (detectReleaseVersionFromTitle impl: java-yoshi)', async () => {
+      const github = new GitHub({owner: 'googleapis', repo: 'foo'});
+      const mock = mockGithubCommon({
+        github,
+        prHead: 'release-please/branches/main',
+        prTitle: 'chore(main): release 1.0.3',
+      });
+      mockGithubLabelsAndComment(mock, true);
+      mock
+        .expects('createRelease')
+        .withExactArgs('foo', 'v1.0.3', 'abc123', '\n* entry', false)
+        .once()
+        .resolves({
+          name: 'foo v1.0.3',
+          tag_name: 'v1.0.3',
+          draft: false,
+          html_url: 'https://release.url',
+          upload_url: 'https://upload.url/',
+          body: '\n* entry',
+        });
+      const releasePR = new JavaYoshi({github, packageName: 'foo'});
+      const release = new GitHubRelease({github, releasePR});
+      const created = await release.run();
+
+      mock.verify();
+      expect(created).to.not.be.undefined;
+      strictEqual(created!.name, 'foo v1.0.3');
+      strictEqual(created!.tag_name, 'v1.0.3');
+      strictEqual(created!.major, 1);
+      strictEqual(created!.minor, 0);
+      strictEqual(created!.patch, 3);
+      strictEqual(created!.draft, false);
+    });
+
+    it('parses version from PR title (detectReleaseVersionFromTitle impl: java-lts)', async () => {
+      const github = new GitHub({owner: 'googleapis', repo: 'foo'});
+      const mock = mockGithubCommon({
+        github,
+        prHead: 'release-please/branches/main',
+        prTitle: 'chore: release 1.0.3-lts.1',
+        version: '1.0.3-lts.1',
+      });
+      mockGithubLabelsAndComment(mock, true);
+      mock
+        .expects('createRelease')
+        .withExactArgs('foo', 'v1.0.3-lts.1', 'abc123', '\n* entry', false)
+        .once()
+        .resolves({
+          name: 'foo v1.0.3-lts.1',
+          tag_name: 'v1.0.3-lts.1',
+          draft: false,
+          html_url: 'https://release.url',
+          upload_url: 'https://upload.url/',
+          body: '\n* entry',
+        });
+      const releasePR = new JavaLTS({github, packageName: 'foo'});
+      const release = new GitHubRelease({github, releasePR});
+      const created = await release.run();
+
+      mock.verify();
+      expect(created).to.not.be.undefined;
+      strictEqual(created!.name, 'foo v1.0.3-lts.1');
+      strictEqual(created!.tag_name, 'v1.0.3-lts.1');
+      strictEqual(created!.major, 1);
+      strictEqual(created!.minor, 0);
+      strictEqual(created!.patch, 3);
+      strictEqual(created!.draft, false);
+    });
+
+    it('does nothing when no merged release PRs found', async () => {
+      const github = new GitHub({owner: 'googleapis', repo: 'foo'});
+      const mock = sandbox.mock(github);
+      mock.expects('getRepositoryDefaultBranch').once().resolves('main');
+      mock.expects('findMergedPullRequests').once().resolves([]);
+      const releasePR = new ReleasePR({github, packageName: 'foo'});
+      const release = new GitHubRelease({github, releasePR});
+      const created = await release.run();
+
+      mock.verify();
+      expect(created).to.be.undefined;
+    });
+
+    it('does nothing when we find a release PR, but cannot determine the version', async () => {
+      const github = new GitHub({owner: 'googleapis', repo: 'foo'});
+      const mock = sandbox.mock(github);
+      mock.expects('getRepositoryDefaultBranch').once().resolves('main');
+      mock
+        .expects('findMergedPullRequests')
+        .once()
+        .resolves([
+          {
+            sha: 'abc123',
+            number: 1,
+            baseRefName: 'main',
+            headRefName: 'release-please/branches/main',
+            labels: ['autorelease: pending'],
+            title: 'Not a match!',
+            body: 'Some release notes',
+          },
+        ]);
+      const releasePR = new ReleasePR({github, packageName: 'foo'});
+      const release = new GitHubRelease({github, releasePR});
+      const created = await release.run();
+
+      mock.verify();
+      expect(created).to.be.undefined;
+    });
+
+    it('ignores tagged pull requests', async () => {
+      const github = new GitHub({owner: 'googleapis', repo: 'foo'});
+      const mock = sandbox.mock(github);
+      mock.expects('getRepositoryDefaultBranch').once().resolves('main');
+      mock
+        .expects('findMergedPullRequests')
+        .once()
+        .resolves([
+          {
+            sha: 'abc123',
+            number: 1,
+            baseRefName: 'main',
+            headRefName: 'release-foo-v1.0.3',
+            labels: ['autorelease: tagged'],
+            title: 'Release foo v1.0.3',
+            body: 'Some release notes',
+          },
+        ]);
+      mock.expects('findMergedPullRequests').once().resolves([]);
+      const releasePR = new ReleasePR({github, packageName: 'foo'});
+      const release = new GitHubRelease({github, releasePR});
+      const created = await release.run();
+
+      mock.verify();
+      expect(created).to.be.undefined;
+    });
+
+    it('supports overriding the release tag', async () => {
+      const github = new GitHub({owner: 'googleapis', repo: 'foo'});
+      const mock = mockGithubCommon({
+        github,
+        prHead: 'release-v1.0.3',
+        prTitle: 'Release v1.0.3',
+      });
+      mockGithubLabelsAndComment(mock, true, 'custom-label');
+      mock
+        .expects('createRelease')
+        .withExactArgs('foo', 'v1.0.3', 'abc123', '\n* entry', false)
+        .once()
+        .resolves({
+          name: 'foo v1.0.3',
+          tag_name: 'v1.0.3',
+          html_url: 'https://release.url',
+          upload_url: 'https://upload.url/',
+          body: '\n* entry',
+        });
+
+      const releasePR = new ReleasePR({github, packageName: 'foo'});
+      const releaser = new GitHubRelease({
+        github,
+        releasePR,
+        releaseLabel: 'custom-label',
+      });
+      const created = await releaser.run();
+
+      ok(created);
     });
   });
+  describe('createRelease', () => {
+    it('uses version for createRelease', async () => {
+      const github = new GitHub({owner: 'googleapis', repo: 'foo'});
+      const expectedCreateReleaseResponse = {
+        name: 'foo v1.0.3',
+        tag_name: 'v1.0.3',
+        draft: false,
+        html_url: 'https://release.url',
+        upload_url: 'https://upload.url/',
+        body: '\n* entry',
+      };
+      const mock = sandbox.mock(github);
+      mock.expects('getRepositoryDefaultBranch').once().resolves('main');
+      mock
+        .expects('getFileContentsOnBranch')
+        .withExactArgs('CHANGELOG.md', 'main')
+        .once()
+        .resolves(buildFileContent('#Changelog\n\n## v1.0.3\n\n* entry'));
+      mock
+        .expects('createRelease')
+        .once()
+        .withExactArgs('foo', 'v1.0.3', 'abc123', '\n* entry', false)
+        .once()
+        .resolves(expectedCreateReleaseResponse);
 
-  describe('extractLatestReleaseNotes', () => {
-    it('handles CHANGELOG with old and new format entries', () => {
-      const changelogContent = readFileSync(
-        resolve(fixturesPath, './CHANGELOG-old-new.md'),
-        'utf8'
-      ).replace(/\r\n/g, '\n');
-      const latestReleaseNotes = GitHubRelease.extractLatestReleaseNotes(
-        changelogContent,
-        'v1.0.0'
-      );
-      snapshot(latestReleaseNotes);
-    });
-
-    it('handles CHANGELOG with old format entries', () => {
-      const changelogContent = readFileSync(
-        resolve(fixturesPath, './CHANGELOG-old.md'),
-        'utf8'
-      ).replace(/\r\n/g, '\n');
-      const latestReleaseNotes = GitHubRelease.extractLatestReleaseNotes(
-        changelogContent,
-        'v2.1.0'
-      );
-      snapshot(latestReleaseNotes);
-    });
-
-    it('handles CHANGELOG with new format entries', () => {
-      const changelogContent = readFileSync(
-        resolve(fixturesPath, './CHANGELOG-new.md'),
-        'utf8'
-      ).replace(/\r\n/g, '\n');
-      const latestReleaseNotes = GitHubRelease.extractLatestReleaseNotes(
-        changelogContent,
-        'v1.2.0'
-      );
-      snapshot(latestReleaseNotes);
-    });
-
-    // see: https://github.com/googleapis/release-please/issues/140
-    it('extracts appropriate release notes when prior release is patch', () => {
-      const changelogContent = readFileSync(
-        resolve(fixturesPath, './CHANGELOG-bug-140.md'),
-        'utf8'
-      ).replace(/\r\n/g, '\n');
-      const latestReleaseNotes = GitHubRelease.extractLatestReleaseNotes(
-        changelogContent,
-        'v5.0.0'
-      );
-      snapshot(latestReleaseNotes);
-    });
-
-    describe('php-yoshi', () => {
-      it('extracts appropriate release notes, when multiple packages updated', () => {
-        const changelogContent = readFileSync(
-          resolve(fixturesPath, './CHANGELOG-php-yoshi.md'),
-          'utf8'
-        ).replace(/\r\n/g, '\n');
-        const latestReleaseNotes = GitHubRelease.extractLatestReleaseNotes(
-          changelogContent,
-          'v0.105.0'
-        );
-        snapshot(latestReleaseNotes);
+      const releasePR = new ReleasePR({github, packageName: 'foo'});
+      const releaser = new GitHubRelease({github, releasePR});
+      const release = await releaser.createRelease('1.0.3', {
+        sha: 'abc123',
+        number: 1,
+        baseRefName: 'main',
+        headRefName: 'release-please/branches/main',
+        labels: [],
+        title: 'chore: release',
+        body: 'the body',
       });
+      mock.verify();
+
+      expect(release).to.not.be.undefined;
+      expect(release).to.eql(expectedCreateReleaseResponse);
+    });
+    it('finds version for createRelease', async () => {
+      const github = new GitHub({owner: 'googleapis', repo: 'foo'});
+      const expectedCreateReleaseResponse = {
+        name: 'foo v1.0.3',
+        tag_name: 'v1.0.3',
+        draft: false,
+        html_url: 'https://release.url',
+        upload_url: 'https://upload.url/',
+        body: '\n* entry',
+      };
+      const mock = mockGithubCommon({
+        github,
+        prHead: 'release-v1.0.3',
+        prTitle: 'Release v1.0.3',
+      });
+      mockGithubLabelsAndComment(mock, false);
+      mock
+        .expects('createRelease')
+        .once()
+        .withExactArgs('foo', 'v1.0.3', 'abc123', '\n* entry', false)
+        .once()
+        .resolves(expectedCreateReleaseResponse);
+
+      const releasePR = new ReleasePR({github, packageName: 'foo'});
+      const releaser = new GitHubRelease({github, releasePR});
+      const [candidate, release] = await releaser.createRelease();
+      mock.verify();
+
+      expect(candidate).to.not.be.undefined;
+      expect(candidate).to.eql({
+        sha: 'abc123',
+        tag: 'v1.0.3',
+        notes: '\n* entry',
+        name: 'foo',
+        version: '1.0.3',
+        pullNumber: 1,
+      });
+      expect(release).to.not.be.undefined;
+      expect(release).to.eql(expectedCreateReleaseResponse);
     });
   });
 });

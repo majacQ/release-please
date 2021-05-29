@@ -12,79 +12,28 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import {ReleasePR, ReleaseCandidate} from '../release-pr';
-
-import {ConventionalCommits} from '../conventional-commits';
-import {GitHubTag, GitHubFileContents} from '../github';
-import {checkpoint, CheckpointType} from '../util/checkpoint';
+import {ReleasePR, ReleaseCandidate, PackageName} from '../release-pr';
+import {GitHubFileContents} from '../github';
 import {Update} from '../updaters/update';
-import {Commit} from '../graphql-to-commits';
 
 // Generic
 import {Changelog} from '../updaters/changelog';
 // OCaml
 import {Opam} from '../updaters/ocaml/opam';
 import {EsyJson} from '../updaters/ocaml/esy-json';
+import {DuneProject} from '../updaters/ocaml/dune-project';
 
 const notEsyLock = (path: string) => !path.startsWith('esy.lock');
 
-const CHANGELOG_SECTIONS = [
-  {type: 'feat', section: 'Features'},
-  {type: 'fix', section: 'Bug Fixes'},
-  {type: 'perf', section: 'Performance Improvements'},
-  {type: 'revert', section: 'Reverts'},
-  {type: 'docs', section: 'Documentation'},
-  {type: 'chore', section: 'Miscellaneous Chores'},
-  {type: 'refactor', section: 'Code Refactoring'},
-  {type: 'test', section: 'Tests'},
-  {type: 'build', section: 'Build System'},
-  {type: 'ci', section: 'Continuous Integration'},
-];
-
 export class OCaml extends ReleasePR {
-  static releaserName = 'ocaml';
-  protected async _run(): Promise<number | undefined> {
-    const latestTag: GitHubTag | undefined = await this.gh.latestTag(
-      this.monorepoTags ? `${this.packageName}-` : undefined
-    );
-    const commits: Commit[] = await this.commits({
-      sha: latestTag ? latestTag.sha : undefined,
-      path: this.path,
-    });
-
-    const cc = new ConventionalCommits({
-      commits,
-      githubRepoUrl: this.repoUrl,
-      bumpMinorPreMajor: this.bumpMinorPreMajor,
-      // TODO: Is this configurable?
-      changelogSections: CHANGELOG_SECTIONS,
-    });
-    const candidate: ReleaseCandidate = await this.coerceReleaseCandidate(
-      cc,
-      latestTag
-    );
-    const changelogEntry: string = await cc.generateChangelogEntry({
-      version: candidate.version,
-      currentTag: `v${candidate.version}`,
-      previousTag: candidate.previousTag,
-    });
-
-    // don't create a release candidate until user facing changes
-    // (fix, feat, BREAKING CHANGE) have been made; a CHANGELOG that's
-    // one line is a good indicator that there were no interesting commits.
-    if (this.changelogEmpty(changelogEntry)) {
-      checkpoint(
-        `no user facing commits found since ${
-          latestTag ? latestTag.sha : 'beginning of time'
-        }`,
-        CheckpointType.Failure
-      );
-      return undefined;
-    }
-
+  protected async buildUpdates(
+    changelogEntry: string,
+    candidate: ReleaseCandidate,
+    packageName: PackageName
+  ): Promise<Update[]> {
     const updates: Update[] = [];
 
-    const jsonPaths = await this.gh.findFilesByExtension('json');
+    const jsonPaths = await this.gh.findFilesByExtension('json', this.path);
     for (const path of jsonPaths) {
       if (notEsyLock(path)) {
         const contents: GitHubFileContents = await this.gh.getFileContents(
@@ -97,7 +46,7 @@ export class OCaml extends ReleasePR {
               path: this.addPath(path),
               changelogEntry,
               version: candidate.version,
-              packageName: this.packageName,
+              packageName: packageName.name,
               contents,
             })
           );
@@ -105,33 +54,35 @@ export class OCaml extends ReleasePR {
       }
     }
 
-    const opamPaths = await this.gh.findFilesByExtension('opam');
+    const opamPaths = await this.gh.findFilesByExtension('opam', this.path);
     opamPaths.filter(notEsyLock).forEach(path => {
       updates.push(
         new Opam({
           path: this.addPath(path),
           changelogEntry,
           version: candidate.version,
-          packageName: this.packageName,
+          packageName: packageName.name,
         })
       );
     });
 
     updates.push(
-      new Changelog({
-        path: this.addPath('CHANGELOG.md'),
+      new DuneProject({
+        path: this.addPath('dune-project'),
         changelogEntry,
         version: candidate.version,
-        packageName: this.packageName,
+        packageName: packageName.name,
       })
     );
 
-    return await this.openPR({
-      sha: commits[0].sha!,
-      changelogEntry: `${changelogEntry}\n---\n`,
-      updates,
-      version: candidate.version,
-      includePackageName: this.monorepoTags,
-    });
+    updates.push(
+      new Changelog({
+        path: this.addPath(this.changelogPath),
+        changelogEntry,
+        version: candidate.version,
+        packageName: packageName.name,
+      })
+    );
+    return updates;
   }
 }

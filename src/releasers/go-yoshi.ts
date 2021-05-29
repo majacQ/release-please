@@ -13,27 +13,15 @@
 // limitations under the License.
 
 import {ReleasePR, ReleaseCandidate} from '../release-pr';
-import {Octokit} from '@octokit/rest';
-import {PromiseValue} from 'type-fest';
 import {ConventionalChangelogCommit} from '@conventional-commits/parser';
-type PullsListResponseItems = PromiseValue<
-  ReturnType<InstanceType<typeof Octokit>['pulls']['list']>
->['data'];
 
 import {ConventionalCommits} from '../conventional-commits';
-import {GitHubTag} from '../github';
-import {checkpoint, CheckpointType} from '../util/checkpoint';
 import {Update} from '../updaters/update';
 import {Commit} from '../graphql-to-commits';
 
-import {ReleaseType} from 'semver';
-import * as semver from 'semver';
-
 // Generic
 import {Changelog} from '../updaters/changelog';
-
-// eslint-disable-next-line @typescript-eslint/no-var-requires
-const parseGithubRepoUrl = require('parse-github-repo-url');
+import {logger} from '../util/logger';
 
 // Commits containing a scope prefixed with an item in this array will be
 // ignored when generating a release PR for the parent module.
@@ -49,17 +37,16 @@ const SUB_MODULES = [
   'storage',
 ];
 const REGEN_PR_REGEX = /.*auto-regenerate.*/;
-const SCOPE_REGEX = /^\w+\((?<scope>.*)\):/;
 
 export class GoYoshi extends ReleasePR {
-  static releaserName = 'go-yoshi';
+  changelogPath = 'CHANGES.md';
+
   protected async _run(): Promise<number | undefined> {
-    const latestTag = await this.gh.latestTag(
-      this.monorepoTags ? `${this.packageName}-` : undefined,
+    const packageName = await this.getPackageName();
+    const latestTag = await this.latestTag(
+      this.monorepoTags ? `${packageName.getComponent()}-` : undefined,
       false
     );
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
-    const [_owner, repo] = parseGithubRepoUrl(this.repoUrl);
     let regenPR: Commit | undefined;
     let sha: null | string = null;
     const commits = (
@@ -75,7 +62,7 @@ export class GoYoshi extends ReleasePR {
       }
 
       if (
-        repo === 'google-api-go-client' &&
+        this.gh.repo === 'google-api-go-client' &&
         REGEN_PR_REGEX.test(commit.message)
       ) {
         // Only have a single entry of the nightly regen listed in the changelog.
@@ -102,24 +89,24 @@ export class GoYoshi extends ReleasePR {
     });
     const cc = new ConventionalCommits({
       commits: commits,
-      githubRepoUrl: this.repoUrl,
+      owner: this.gh.owner,
+      repository: this.gh.repo,
       bumpMinorPreMajor: this.bumpMinorPreMajor,
-      commitFilter: this.filterSubModuleCommits(repo),
+      commitFilter: this.filterSubModuleCommits(this.gh.repo, packageName.name),
     });
-    const candidate: ReleaseCandidate =
-      this.monorepoTags || !this.isMultiClientRepo(repo)
-        ? // Submodules use conventional commits to bump major/minor/patch:
-          await super.coerceReleaseCandidate(cc, latestTag)
-        : // Root module always bumps minor:
-          await this.coerceReleaseCandidate(cc, latestTag);
-
+    const candidate: ReleaseCandidate = await this.coerceReleaseCandidate(
+      cc,
+      latestTag
+    );
     // "closes" is a little presumptuous, let's just indicate that the
     // PR references these other commits:
     const changelogEntry: string = (
       await cc.generateChangelogEntry({
         version: candidate.version,
-        currentTag: `v${candidate.version}`,
-        previousTag: candidate.previousTag,
+        currentTag: await this.normalizeTagName(candidate.version),
+        previousTag: candidate.previousTag
+          ? await this.normalizeTagName(candidate.previousTag)
+          : undefined,
       })
     ).replace(/, closes /g, ', refs ');
 
@@ -127,11 +114,10 @@ export class GoYoshi extends ReleasePR {
     // (fix, feat, BREAKING CHANGE) have been made; a CHANGELOG that's
     // one line is a good indicator that there were no interesting commits.
     if (this.changelogEmpty(changelogEntry)) {
-      checkpoint(
+      logger.error(
         `no user facing commits found since ${
           latestTag ? latestTag.sha : 'beginning of time'
-        }`,
-        CheckpointType.Failure
+        }`
       );
       return undefined;
     }
@@ -140,10 +126,10 @@ export class GoYoshi extends ReleasePR {
 
     updates.push(
       new Changelog({
-        path: this.addPath('CHANGES.md'),
+        path: this.addPath(this.changelogPath),
         changelogEntry,
         version: candidate.version,
-        packageName: this.packageName,
+        packageName: packageName.name,
       })
     );
     if (!sha) {
@@ -166,29 +152,17 @@ export class GoYoshi extends ReleasePR {
     return repo === 'google-cloud-go' || repo === 'google-api-go-client';
   }
 
-  protected async coerceReleaseCandidate(
-    cc: ConventionalCommits,
-    latestTag: GitHubTag | undefined
-  ): Promise<ReleaseCandidate> {
-    const version = latestTag
-      ? latestTag.version
-      : this.defaultInitialVersion();
-    const previousTag = latestTag ? latestTag.name : undefined;
-    const bump: ReleaseType = 'minor';
-    const candidate: string | null = semver.inc(version, bump);
-    return {version: candidate as string, previousTag};
-  }
-
-  protected defaultInitialVersion(): string {
+  defaultInitialVersion(): string {
     return '0.1.0';
   }
 
-  static tagSeparator(): string {
+  tagSeparator(): string {
     return '/';
   }
 
   private filterSubModuleCommits(
-    repo: string
+    repo: string,
+    packageName: string
   ): (c: ConventionalChangelogCommit) => boolean {
     return (c: ConventionalChangelogCommit) => {
       if (this.isGapicRepo(repo)) {
@@ -207,10 +181,7 @@ export class GoYoshi extends ReleasePR {
           }
         } else {
           if (
-            !(
-              c.scope === this.packageName ||
-              c.scope.startsWith(this.packageName + '/')
-            )
+            !(c.scope === packageName || c.scope.startsWith(packageName + '/'))
           ) {
             return true;
           }

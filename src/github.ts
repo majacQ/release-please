@@ -13,10 +13,12 @@
 // limitations under the License.
 
 import {createPullRequest, Changes} from 'code-suggester';
+import {logger} from './util/logger';
 
 import {Octokit} from '@octokit/rest';
 import {request} from '@octokit/request';
 import {graphql} from '@octokit/graphql';
+import {Endpoints} from '@octokit/types';
 // The return types for responses have not yet been exposed in the
 // @octokit/* libraries, we explicitly define the types below to work
 // around this,. See: https://github.com/octokit/rest.js/issues/1624
@@ -39,15 +41,37 @@ type GitGetTreeResponse = PromiseValue<
 type IssuesListResponseItem = PromiseValue<
   ReturnType<InstanceType<typeof Octokit>['issues']['get']>
 >['data'];
-type FileSearchResponse = PromiseValue<
-  ReturnType<InstanceType<typeof Octokit>['search']['code']>
+type CreateIssueCommentResponse = PromiseValue<
+  ReturnType<InstanceType<typeof Octokit>['issues']['createComment']>
 >['data'];
-export type ReleaseCreateResponse = PromiseValue<
-  ReturnType<InstanceType<typeof Octokit>['repos']['createRelease']>
->['data'];
-type ReposListTagsResponseItems = PromiseValue<
-  ReturnType<InstanceType<typeof Octokit>['tags']['list']>
->['data'];
+// see: PromiseValue<
+//  ReturnType<InstanceType<typeof Octokit>['repos']['createRelease']>
+// >['data'];
+type CommitsListResponse =
+  Endpoints['GET /repos/{owner}/{repo}/commits']['response'];
+type CommitGetResponse =
+  Endpoints['GET /repos/{owner}/{repo}/commits/{ref}']['response'];
+export type ReleaseCreateResponse = {
+  name: string;
+  tag_name: string;
+  draft: boolean;
+  html_url: string;
+  upload_url: string;
+  body: string;
+};
+type ReposListTagsResponseItems = {
+  name: string;
+  commit: {
+    sha: string;
+    url: string;
+  };
+  zipball_url: string;
+  tarball_url: string;
+  node_id: string;
+};
+function isReposListResponse(arg: unknown): arg is ReposListTagsResponseItems {
+  return typeof arg === 'object' && Object.hasOwnProperty.call(arg, 'name');
+}
 
 // Extract some types from the `request` package.
 type RequestBuilderType = typeof request;
@@ -55,10 +79,15 @@ type DefaultFunctionType = RequestBuilderType['defaults'];
 type RequestFunctionType = ReturnType<DefaultFunctionType>;
 type RequestOptionsType = Parameters<DefaultFunctionType>[0];
 
+type MergedPullRequestFilter = (filter: MergedGitHubPR) => boolean;
+type CommitFilter = (
+  commit: Commit,
+  pullRequest: MergedGitHubPR | undefined
+) => boolean;
+
 import chalk = require('chalk');
 import * as semver from 'semver';
 
-import {checkpoint, CheckpointType} from './util/checkpoint';
 import {
   Commit,
   CommitsResponse,
@@ -66,14 +95,9 @@ import {
   PREdge,
 } from './graphql-to-commits';
 import {Update} from './updaters/update';
-import {resolve} from 'path';
-
-// Short explanation of this regex:
-// - skip the owner tag (e.g. googleapis)
-// - make sure the branch name starts with "release"
-// - take everything else
-// This includes the tag to handle monorepos.
-const VERSION_FROM_BRANCH_RE = /^.*:release-?([\w-.]*)-(v[0-9].*)$/;
+import {BranchName} from './util/branch-name';
+import {RELEASE_PLEASE, GH_API_URL} from './constants';
+import {GitHubConstructorOptions} from '.';
 
 export interface OctokitAPIs {
   graphql: Function;
@@ -81,24 +105,8 @@ export interface OctokitAPIs {
   octokit: OctokitType;
 }
 
-interface GitHubOptions {
-  defaultBranch?: string;
-  token?: string;
-  owner: string;
-  repo: string;
-  apiUrl?: string;
-  proxyKey?: string;
-  octokitAPIs?: OctokitAPIs;
-}
-
 export interface GitHubTag {
   name: string;
-  sha: string;
-  version: string;
-}
-
-export interface GitHubReleasePR {
-  number: number;
   sha: string;
   version: string;
 }
@@ -111,17 +119,87 @@ export interface GitHubFileContents {
 
 export interface GitHubPR {
   branch: string;
-  fork: boolean;
-  version: string;
   title: string;
   body: string;
-  sha: string;
   updates: Update[];
   labels: string[];
+  changes?: Changes;
 }
 
-interface FileSearchResponseFile {
-  path: string;
+export interface MergedGitHubPR {
+  sha: string;
+  number: number;
+  baseRefName: string;
+  headRefName: string;
+  labels: string[];
+  title: string;
+  body: string;
+}
+
+interface CommitWithPullRequest {
+  commit: Commit;
+  pullRequest?: MergedGitHubPR;
+}
+
+interface PullRequestHistory {
+  pageInfo: {
+    hasNextPage: boolean;
+    endCursor: string | undefined;
+  };
+  data: CommitWithPullRequest[];
+}
+
+interface GraphQLCommit {
+  sha: string;
+  message: string;
+  associatedPullRequests: {
+    nodes: {
+      number: number;
+      title: string;
+      body: string;
+      baseRefName: string;
+      headRefName: string;
+      labels: {
+        nodes: {
+          name: string;
+        }[];
+      };
+      mergeCommit?: {
+        oid: string;
+      };
+    }[];
+  };
+}
+
+export interface MergedGitHubPRWithFiles extends MergedGitHubPR {
+  files: string[];
+}
+
+// GraphQL reponse types
+export interface Repository<T> {
+  repository: T;
+}
+
+interface Nodes<T> {
+  nodes: T[];
+}
+
+export interface PageInfo {
+  endCursor: string;
+  hasNextPage: boolean;
+}
+
+interface PullRequestNode {
+  title: string;
+  body: string;
+  number: number;
+  mergeCommit: {oid: string};
+  files: {pageInfo: PageInfo} & Nodes<{path: string}>;
+  labels: Nodes<{name: string}>;
+}
+
+export interface PullRequests {
+  pullRequests: Nodes<PullRequestNode>;
 }
 
 let probotMode = false;
@@ -135,15 +213,16 @@ export class GitHub {
   owner: string;
   repo: string;
   apiUrl: string;
-  proxyKey?: string;
+  fork: boolean;
+  repositoryDefaultBranch?: string;
 
-  constructor(options: GitHubOptions) {
+  constructor(options: GitHubConstructorOptions) {
     this.defaultBranch = options.defaultBranch;
     this.token = options.token;
     this.owner = options.owner;
     this.repo = options.repo;
-    this.apiUrl = options.apiUrl || 'https://api.github.com';
-    this.proxyKey = options.proxyKey;
+    this.fork = !!options.fork;
+    this.apiUrl = options.apiUrl || GH_API_URL;
 
     if (options.octokitAPIs === undefined) {
       this.octokit = new Octokit({
@@ -153,11 +232,10 @@ export class GitHub {
       const defaults: RequestOptionsType = {
         baseUrl: this.apiUrl,
         headers: {
-          'user-agent': `release-please/${
-            require(resolve('package.json')).version
+          'user-agent': `${RELEASE_PLEASE}/${
+            require('../../package.json').version
           }`,
-          // some proxies do not require the token prefix.
-          Authorization: `${this.proxyKey ? '' : 'token '}${this.token}`,
+          Authorization: `token ${this.token}`,
         },
       };
       this.request = request.defaults(defaults);
@@ -172,22 +250,38 @@ export class GitHub {
     }
   }
 
-  private async graphqlRequest(_opts: {
+  private async makeGraphqlRequest(_opts: {
     [key: string]: string | number | null | undefined;
   }) {
     let opts = Object.assign({}, _opts);
     if (!probotMode) {
       opts = Object.assign(opts, {
-        url: `${this.apiUrl}/graphql${
-          this.proxyKey ? `?key=${this.proxyKey}` : ''
-        }`,
+        url: `${this.apiUrl}/graphql`,
         headers: {
-          authorization: `${this.proxyKey ? '' : 'token '}${this.token}`,
+          authorization: `token ${this.token}`,
           'content-type': 'application/vnd.github.v3+json',
         },
       });
     }
     return this.graphql(opts);
+  }
+
+  private async graphqlRequest(
+    opts: {
+      [key: string]: string | number | null | undefined;
+    },
+    maxRetries = 1
+  ) {
+    while (maxRetries >= 0) {
+      try {
+        return await this.makeGraphqlRequest(opts);
+      } catch (err) {
+        if (err.status !== 502) {
+          throw err;
+        }
+      }
+      maxRetries -= 1;
+    }
   }
 
   private decoratePaginateOpts(opts: EndpointOptions): EndpointOptions {
@@ -196,12 +290,91 @@ export class GitHub {
     } else {
       return Object.assign(opts, {
         headers: {
-          Authorization: `${this.proxyKey ? '' : 'token '}${this.token}`,
+          Authorization: `token ${this.token}`,
         },
       });
     }
   }
 
+  async commitsSinceShaRest(
+    sha?: string,
+    path?: string,
+    per_page = 100
+  ): Promise<Commit[]> {
+    let page = 1;
+    let found = false;
+    const baseBranch = await this.getDefaultBranch();
+    const commits: [string | null, string][] = [];
+    while (!found) {
+      const response = await this.request(
+        'GET /repos/{owner}/{repo}/commits{?sha,page,per_page,path}',
+        {
+          owner: this.owner,
+          repo: this.repo,
+          sha: baseBranch,
+          page,
+          per_page,
+          path,
+        }
+      );
+      for (const commit of (response as CommitsListResponse).data) {
+        if (commit.sha === sha) {
+          found = true;
+          break;
+        }
+        // skip merge commits
+        if (commit.parents.length === 2) {
+          continue;
+        }
+        commits.push([commit.sha, commit.commit.message]);
+      }
+      page++;
+    }
+    const ret = [];
+    for (const [ref, message] of commits) {
+      const files = [];
+      let page = 1;
+      let moreFiles = true;
+      while (moreFiles) {
+        // the "Get Commit" resource is a bit of an outlier in terms of GitHub's
+        // normal pagination: https://git.io/JmVZq
+        // The behavior is to return an object representing the commit, a
+        // property of which is an array of files. GitHub will return as many
+        // associated files as there are, up to a limit of 300, on the initial
+        // request. If there are more associated files, it will send "Links"
+        // headers to get the next set. There is a total limit of 3000
+        // files returned per commit.
+        // In practice, the links headers are just the same resourceID plus a
+        // "page=N" query parameter with "page=1" being the initial set.
+        //
+        // TODO: it is more robust to follow the link.next headers (in case
+        // GitHub ever changes the pattern) OR use ocktokit pagination for this
+        // endpoint when https://git.io/JmVll is addressed.
+        const response = (await this.request(
+          'GET /repos/{owner}/{repo}/commits/{ref}{?page}',
+          {owner: this.owner, repo: this.repo, ref, page}
+        )) as CommitGetResponse;
+        const commitFiles = response.data.files;
+        if (!commitFiles) {
+          moreFiles = false;
+          break;
+        }
+        files.push(...commitFiles.map(f => f.filename ?? ''));
+        // < 300 files means we hit the end
+        // page === 10 means we're at 3000 and that's the limit GH is gonna
+        // cough up anyway.
+        if (commitFiles.length < 300 || page === 10) {
+          moreFiles = false;
+          break;
+        }
+        page++;
+      }
+      ret.push({sha: ref, message, files});
+    }
+    return ret;
+  }
+
+  // Commit.files only for commits from PRs.
   async commitsSinceSha(
     sha: string | undefined,
     perPage = 100,
@@ -238,8 +411,7 @@ export class GitHub {
     cursor: string | undefined = undefined,
     perPage = 32,
     path: string | null = null,
-    maxFilesChanged = 64,
-    retries = 0
+    maxFilesChanged = 64
   ): Promise<CommitsResponse> {
     const baseBranch = await this.getDefaultBranch();
 
@@ -247,37 +419,36 @@ export class GitHub {
     // in conjucntion with the path that they modify. We lean on the graphql
     // API for this one task, fetching commits in descending chronological
     // order along with the file paths attached to them.
-    try {
-      const response = await this.graphqlRequest({
+    const response = await this.graphqlRequest(
+      {
         query: `query commitsWithFiles($cursor: String, $owner: String!, $repo: String!, $baseRef: String!, $perPage: Int, $maxFilesChanged: Int, $path: String) {
-          repository(owner: $owner, name: $repo) {
-            ref(qualifiedName: $baseRef) {
-              target {
-                ... on Commit {
-                  history(first: $perPage, after: $cursor, path: $path) {
-                    edges {
-                      node {
-                        ... on Commit {
-                          message
-                          oid
-                          associatedPullRequests(first: 1) {
-                            edges {
-                              node {
-                                ... on PullRequest {
-                                  number
-                                  mergeCommit {
-                                    oid
+        repository(owner: $owner, name: $repo) {
+          ref(qualifiedName: $baseRef) {
+            target {
+              ... on Commit {
+                history(first: $perPage, after: $cursor, path: $path) {
+                  edges {
+                    node {
+                      ... on Commit {
+                        message
+                        oid
+                        associatedPullRequests(first: 1) {
+                          edges {
+                            node {
+                              ... on PullRequest {
+                                number
+                                mergeCommit {
+                                  oid
+                                }
+                                files(first: $maxFilesChanged) {
+                                  edges {
+                                    node {
+                                      path
+                                    }
                                   }
-                                  files(first: $maxFilesChanged) {
-                                    edges {
-                                      node {
-                                        path
-                                      }
-                                    }
-                                    pageInfo {
-                                      endCursor
-                                      hasNextPage
-                                    }
+                                  pageInfo {
+                                    endCursor
+                                    hasNextPage
                                   }
                                 }
                               }
@@ -286,16 +457,17 @@ export class GitHub {
                         }
                       }
                     }
-                    pageInfo {
-                      endCursor
-                      hasNextPage
-                    }
+                  }
+                  pageInfo {
+                    endCursor
+                    hasNextPage
                   }
                 }
               }
             }
           }
-        }`,
+        }
+      }`,
         cursor,
         maxFilesChanged,
         owner: this.owner,
@@ -303,60 +475,44 @@ export class GitHub {
         perPage,
         repo: this.repo,
         baseRef: `refs/heads/${baseBranch}`,
-      });
-      return graphqlToCommits(this, response);
-    } catch (err) {
-      if (err.status === 502 && retries < 3) {
-        // GraphQL sometimes returns a 502 on the first request,
-        // this seems to relate to a cache being warmed and the
-        // second request generally works.
-        return this.commitsWithFiles(
-          cursor,
-          perPage,
-          path,
-          maxFilesChanged,
-          retries++
-        );
-      } else {
-        throw err;
-      }
-    }
+      },
+      3
+    );
+    return graphqlToCommits(this, response);
   }
 
   private async commitsWithLabels(
     cursor: string | undefined = undefined,
     perPage = 32,
     path: string | null = null,
-    maxLabels = 16,
-    retries = 0
+    maxLabels = 16
   ): Promise<CommitsResponse> {
     const baseBranch = await this.getDefaultBranch();
-    try {
-      const response = await this.graphqlRequest({
+    const response = await this.graphqlRequest(
+      {
         query: `query commitsWithLabels($cursor: String, $owner: String!, $repo: String!, $baseRef: String!, $perPage: Int, $maxLabels: Int, $path: String) {
-          repository(owner: $owner, name: $repo) {
-            ref(qualifiedName: $baseRef) {
-              target {
-                ... on Commit {
-                  history(first: $perPage, after: $cursor, path: $path) {
-                    edges {
-                      node {
-                        ... on Commit {
-                          message
-                          oid
-                          associatedPullRequests(first: 1) {
-                            edges {
-                              node {
-                                ... on PullRequest {
-                                  number
-                                  mergeCommit {
-                                    oid
-                                  }
-                                  labels(first: $maxLabels) {
-                                    edges {
-                                      node {
-                                        name
-                                      }
+        repository(owner: $owner, name: $repo) {
+          ref(qualifiedName: $baseRef) {
+            target {
+              ... on Commit {
+                history(first: $perPage, after: $cursor, path: $path) {
+                  edges {
+                    node {
+                      ... on Commit {
+                        message
+                        oid
+                        associatedPullRequests(first: 1) {
+                          edges {
+                            node {
+                              ... on PullRequest {
+                                number
+                                mergeCommit {
+                                  oid
+                                }
+                                labels(first: $maxLabels) {
+                                  edges {
+                                    node {
+                                      name
                                     }
                                   }
                                 }
@@ -366,16 +522,17 @@ export class GitHub {
                         }
                       }
                     }
-                    pageInfo {
-                      endCursor
-                      hasNextPage
-                    }
+                  }
+                  pageInfo {
+                    endCursor
+                    hasNextPage
                   }
                 }
               }
             }
           }
-        }`,
+        }
+      }`,
         cursor,
         maxLabels,
         owner: this.owner,
@@ -383,24 +540,10 @@ export class GitHub {
         perPage,
         repo: this.repo,
         baseRef: `refs/heads/${baseBranch}`,
-      });
-      return graphqlToCommits(this, response);
-    } catch (err) {
-      if (err.status === 502 && retries < 3) {
-        // GraphQL sometimes returns a 502 on the first request,
-        // this seems to relate to a cache being warmed and the
-        // second request generally works.
-        return this.commitsWithLabels(
-          cursor,
-          perPage,
-          path,
-          maxLabels,
-          retries++
-        );
-      } else {
-        throw err;
-      }
-    }
+      },
+      3
+    );
+    return graphqlToCommits(this, response);
   }
 
   async pullRequestFiles(
@@ -440,9 +583,7 @@ export class GitHub {
 
   async getTagSha(name: string): Promise<string> {
     const refResponse = (await this.request(
-      `GET /repos/:owner/:repo/git/refs/tags/:name${
-        this.proxyKey ? `?key=${this.proxyKey}` : ''
-      }`,
+      'GET /repos/:owner/:repo/git/refs/tags/:name',
       {
         owner: this.owner,
         repo: this.repo,
@@ -452,20 +593,76 @@ export class GitHub {
     return refResponse.data.object.sha;
   }
 
-  // This looks for the most recent matching release tag on
-  // the branch we're configured for.
-  async latestTag(
-    prefix?: string,
-    preRelease = false
-  ): Promise<GitHubTag | undefined> {
-    const pull = await this.findMergedReleasePR([], 100, prefix, preRelease);
-    if (!pull) return await this.latestTagFallback(prefix, preRelease);
-    const tag = {
-      name: `v${pull.version}`,
-      sha: pull.sha,
-      version: pull.version,
-    } as GitHubTag;
-    return tag;
+  /**
+   * Find the "last" merged PR given a headBranch. "last" here means
+   * the most recently created. Includes all associated files.
+   *
+   * @param {string} headBranch - e.g. "release-please/branches/main"
+   * @returns {MergedGitHubPRWithFiles} - if found, otherwise undefined.
+   */
+  async lastMergedPRByHeadBranch(
+    headBranch: string
+  ): Promise<MergedGitHubPRWithFiles | undefined> {
+    const baseBranch = await this.getDefaultBranch();
+    const response: Repository<PullRequests> = await this.graphqlRequest({
+      query: `query lastMergedPRByHeadBranch($owner: String!, $repo: String!, $baseBranch: String!, $headBranch: String!) {
+          repository(owner: $owner, name: $repo) {
+            pullRequests(baseRefName: $baseBranch, states: MERGED, orderBy: {field: CREATED_AT, direction: DESC}, first: 1, headRefName: $headBranch) {
+            nodes {
+              title
+              body
+              number
+              mergeCommit {
+                oid
+              }
+              files(first: 100) {
+                nodes {
+                  path
+                }
+                pageInfo {
+                  hasNextPage
+                  endCursor
+                }
+              }
+              labels(first: 10) {
+                nodes {
+                  name
+                }
+              }
+            }
+          }
+        }
+      }`,
+      owner: this.owner,
+      repo: this.repo,
+      baseBranch,
+      headBranch,
+    });
+    let result: MergedGitHubPRWithFiles | undefined = undefined;
+    const pr = response.repository.pullRequests.nodes[0];
+    if (pr) {
+      const files = pr.files.nodes.map(({path}) => path);
+      let hasMoreFiles = pr.files.pageInfo.hasNextPage;
+      let cursor = pr.files.pageInfo.endCursor;
+      while (hasMoreFiles) {
+        const next = await this.pullRequestFiles(pr.number, cursor);
+        const nextFiles = next.node.files.edges.map(fe => fe.node.path);
+        files.push(...nextFiles);
+        cursor = next.node.files.pageInfo.endCursor;
+        hasMoreFiles = next.node.files.pageInfo.hasNextPage;
+      }
+      result = {
+        sha: pr.mergeCommit.oid,
+        title: pr.title,
+        body: pr.body,
+        number: pr.number,
+        baseRefName: baseBranch,
+        headRefName: headBranch,
+        files,
+        labels: pr.labels.nodes.map(({name}) => name),
+      };
+    }
+    return result;
   }
 
   // If we can't find a release branch (a common cause of this, as an example
@@ -520,14 +717,13 @@ export class GitHub {
     for await (const response of this.octokit.paginate.iterator(
       this.decoratePaginateOpts({
         method: 'GET',
-        url: `/repos/${this.owner}/${this.repo}/tags?per_page=100${
-          this.proxyKey ? `&key=${this.proxyKey}` : ''
-        }`,
+        url: `/repos/${this.owner}/${this.repo}/tags?per_page=100`,
       })
     )) {
-      response.data.forEach((data: ReposListTagsResponseItems) => {
+      response.data.forEach(data => {
         // For monorepos, a prefix can be provided, indicating that only tags
         // matching the prefix should be returned:
+        if (!isReposListResponse(data)) return;
         let version = data.name;
         if (prefix) {
           let match = false;
@@ -539,7 +735,8 @@ export class GitHub {
           }
           if (!match) return;
         }
-        if ((version = semver.valid(version))) {
+        if (semver.valid(version)) {
+          version = semver.valid(version) as string;
           tags[version] = {sha: data.commit.sha, name: data.name, version};
         }
       });
@@ -547,79 +744,334 @@ export class GitHub {
     return tags;
   }
 
-  // The default matcher will rule out pre-releases.
-  // TODO: make this handle more than 100 results using async iterator.
-  async findMergedReleasePR(
-    labels: string[],
-    perPage = 100,
-    branchPrefix: string | undefined = undefined,
-    preRelease = true,
-    sort = 'created'
-  ): Promise<GitHubReleasePR | undefined> {
-    branchPrefix = branchPrefix?.endsWith('-')
-      ? branchPrefix.replace(/-$/, '')
-      : branchPrefix;
-    const baseLabel = await this.getBaseLabel();
+  private async mergeCommitsGraphQL(
+    cursor?: string
+  ): Promise<PullRequestHistory> {
+    const targetBranch = await this.getDefaultBranch();
+    const response = await this.graphqlRequest({
+      query: `query pullRequestsSince($owner: String!, $repo: String!, $num: Int!, $targetBranch: String!, $cursor: String) {
+        repository(owner: $owner, name: $repo) {
+          ref(qualifiedName: $targetBranch) {
+            target {
+              ... on Commit {
+                history(first: $num, after: $cursor) {
+                  nodes {
+                    associatedPullRequests(first: 10) {
+                      nodes {
+                        number
+                        title
+                        baseRefName
+                        headRefName
+                        labels(first: 10) {
+                          nodes {
+                            name
+                          }
+                        }
+                        body
+                        mergeCommit {
+                          oid
+                        }
+                      }
+                    }
+                    sha: oid
+                    message
+                  }
+                  pageInfo {
+                    hasNextPage
+                    endCursor
+                  }
+                }
+              }
+            }
+          }
+        }
+      }`,
+      cursor,
+      owner: this.owner,
+      repo: this.repo,
+      num: 25,
+      targetBranch,
+    });
+    const history = response.repository.ref.target.history;
+    const commits = (history.nodes || []) as GraphQLCommit[];
+    return {
+      pageInfo: history.pageInfo,
+      data: commits.map(graphCommit => {
+        const commit = {
+          sha: graphCommit.sha,
+          message: graphCommit.message,
+          files: [] as string[],
+        };
+        const pullRequest = graphCommit.associatedPullRequests.nodes.find(
+          pr => {
+            return pr.mergeCommit && pr.mergeCommit.oid === graphCommit.sha;
+          }
+        );
+        if (pullRequest) {
+          return {
+            commit,
+            pullRequest: {
+              sha: commit.sha,
+              number: pullRequest.number,
+              baseRefName: pullRequest.baseRefName,
+              headRefName: pullRequest.headRefName,
+              title: pullRequest.title,
+              body: pullRequest.body,
+              labels: pullRequest.labels.nodes.map(node => node.name),
+            },
+          };
+        }
+        return {
+          commit,
+        };
+      }),
+    };
+  }
+
+  /**
+   * Search through commit history to find the latest commit that matches to
+   * provided filter.
+   *
+   * @param {CommitFilter} filter - Callback function that returns whether a
+   *   commit/pull request matches certain criteria
+   * @param {number} maxResults - Limit the number of results searched.
+   *   Defaults to unlimited.
+   * @returns {CommitWithPullRequest}
+   */
+  async findMergeCommit(
+    filter: CommitFilter,
+    maxResults: number = Number.MAX_SAFE_INTEGER
+  ): Promise<CommitWithPullRequest | undefined> {
+    const generator = this.mergeCommitIterator(maxResults);
+    for await (const commitWithPullRequest of generator) {
+      if (
+        filter(commitWithPullRequest.commit, commitWithPullRequest.pullRequest)
+      ) {
+        return commitWithPullRequest;
+      }
+    }
+    return undefined;
+  }
+
+  /**
+   * Iterate through commit history with a max number of results scanned.
+   *
+   * @param maxResults {number} maxResults - Limit the number of results searched.
+   *   Defaults to unlimited.
+   * @yields {CommitWithPullRequest}
+   */
+  async *mergeCommitIterator(maxResults: number = Number.MAX_SAFE_INTEGER) {
+    let cursor: string | undefined = undefined;
+    let results = 0;
+    while (results < maxResults) {
+      const response: PullRequestHistory = await this.mergeCommitsGraphQL(
+        cursor
+      );
+      for (let i = 0; i < response.data.length; i++) {
+        results += 1;
+        yield response.data[i];
+      }
+      if (!response.pageInfo.hasNextPage) {
+        break;
+      }
+      cursor = response.pageInfo.endCursor;
+    }
+  }
+
+  /**
+   * Returns the list of commits to the default branch after the provided filter
+   * query has been satified.
+   *
+   * @param {CommitFilter} filter - Callback function that returns whether a
+   *   commit/pull request matches certain criteria
+   * @param {number} maxResults - Limit the number of results searched.
+   *   Defaults to unlimited.
+   * @returns {Commit[]} - List of commits to current branch
+   */
+  async commitsSince(
+    filter: CommitFilter,
+    maxResults: number = Number.MAX_SAFE_INTEGER
+  ): Promise<Commit[]> {
+    const commits: Commit[] = [];
+    const generator = this.mergeCommitIterator(maxResults);
+    for await (const commitWithPullRequest of generator) {
+      if (
+        filter(commitWithPullRequest.commit, commitWithPullRequest.pullRequest)
+      ) {
+        break;
+      }
+      commits.push(commitWithPullRequest.commit);
+    }
+    return commits;
+  }
+
+  /**
+   * Return a list of merged pull requests. The list is not guaranteed to be sorted
+   * by merged_at, but is generally most recent first.
+   *
+   * @param {string} targetBranch - Base branch of the pull request. Defaults to
+   *   the configured default branch.
+   * @param {number} page - Page of results. Defaults to 1.
+   * @param {number} perPage - Number of results per page. Defaults to 100.
+   * @returns {MergedGitHubPR[]} - List of merged pull requests
+   */
+  async findMergedPullRequests(
+    targetBranch?: string,
+    page = 1,
+    perPage = 100
+  ): Promise<MergedGitHubPR[]> {
+    if (!targetBranch) {
+      targetBranch = await this.getDefaultBranch();
+    }
+    // TODO: is sorting by updated better?
     const pullsResponse = (await this.request(
-      `GET /repos/:owner/:repo/pulls?state=closed&per_page=${perPage}${
-        this.proxyKey ? `&key=${this.proxyKey}` : ''
-      }&sort=${sort}&direction=desc`,
+      `GET /repos/:owner/:repo/pulls?state=closed&per_page=${perPage}&page=${page}&base=${targetBranch}&sort=created&direction=desc`,
       {
         owner: this.owner,
         repo: this.repo,
       }
     )) as {data: PullsListResponseItems};
-    for (const pull of pullsResponse.data) {
-      if (
-        labels.length === 0 ||
-        this.hasAllLabels(
-          labels,
-          pull.labels.map(l => {
-            return l.name + '';
-          })
-        )
-      ) {
-        // it's expected that a release PR will have a
-        // HEAD matching the format repo:release-v1.0.0.
-        if (!pull.head) continue;
 
-        // Verify that this PR was based against our base branch of interest.
-        if (!pull.base || pull.base.label !== baseLabel) continue;
+    // TODO: distinguish between no more pages and a full page of
+    // closed, non-merged pull requests. At page size of 100, this unlikely
+    // to matter
 
-        // The input should look something like:
-        // user:release-[optional-package-name]-v1.2.3
-        // We want the package name and any semver on the end.
-        const match = pull.head.label.match(VERSION_FROM_BRANCH_RE);
-        if (!match || !pull.merged_at) continue;
+    if (!pullsResponse.data) {
+      return [];
+    }
 
-        // The input here should look something like:
-        // [optional-package-name-]v1.2.3[-beta-or-whatever]
-        // Because the package name can contain things like "-v1",
-        // it's easiest/safest to just pull this out by string search.
-        const version = match[2];
-        if (!version) continue;
-        if (branchPrefix && match[1] !== branchPrefix) {
-          continue;
-        } else if (!branchPrefix && match[1]) {
-          continue;
+    return (
+      pullsResponse.data
+        // only return merged pull requests
+        .filter(pull => {
+          return !!pull.merged_at;
+        })
+        .map(pull => {
+          const labels = pull.labels
+            ? pull.labels.map(l => {
+                return l.name + '';
+              })
+            : [];
+          return {
+            sha: pull.merge_commit_sha!, // already filtered non-merged
+            number: pull.number,
+            baseRefName: pull.base.ref,
+            headRefName: pull.head.ref,
+            labels,
+            title: pull.title,
+            body: pull.body + '',
+          };
+        })
+    );
+  }
+
+  /**
+   * Helper to find the first merged pull request that matches the
+   * given criteria. The helper will paginate over all pull requests
+   * merged into the specified target branch.
+   *
+   * @param {string} targetBranch - Base branch of the pull request
+   * @param {MergedPullRequestFilter} filter - Callback function that
+   *   returns whether a pull request matches certain criteria
+   * @returns {MergedGitHubPR | undefined} - Returns the first matching
+   *   pull request, or `undefined` if no matching pull request found.
+   */
+  async findMergedPullRequest(
+    targetBranch: string,
+    filter: MergedPullRequestFilter
+  ): Promise<MergedGitHubPR | undefined> {
+    let page = 1;
+    let mergedPullRequests = await this.findMergedPullRequests(
+      targetBranch,
+      page
+    );
+    while (mergedPullRequests.length > 0) {
+      const found = mergedPullRequests.find(filter);
+      if (found) {
+        return found;
+      }
+      page += 1;
+      mergedPullRequests = await this.findMergedPullRequests(
+        targetBranch,
+        page
+      );
+    }
+    return undefined;
+  }
+
+  // The default matcher will rule out pre-releases.
+  /**
+   * Find the last merged pull request that targeted the default
+   * branch and looks like a release PR.
+   *
+   * @param {string[]} labels - If provided, ensure that the pull
+   *   request has all of the specified labels
+   * @param {string|undefined} branchPrefix - If provided, limit
+   *   release pull requests that contain the specified component
+   * @param {boolean} preRelease - Whether to include pre-release
+   *   versions in the response. Defaults to true.
+   * @param {number} maxResults - Limit the number of results searched.
+   *   Defaults to unlimited.
+   * @returns {MergedGitHubPR|undefined}
+   */
+  async findMergedReleasePR(
+    labels: string[],
+    branchPrefix: string | undefined = undefined,
+    preRelease = true,
+    maxResults: number = Number.MAX_SAFE_INTEGER
+  ): Promise<MergedGitHubPR | undefined> {
+    branchPrefix = branchPrefix?.endsWith('-')
+      ? branchPrefix.replace(/-$/, '')
+      : branchPrefix;
+
+    const mergedCommit = await this.findMergeCommit(
+      (_commit, mergedPullRequest) => {
+        if (!mergedPullRequest) {
+          return false;
+        }
+
+        // If labels specified, ensure the pull request has all the specified labels
+        if (
+          labels.length > 0 &&
+          !this.hasAllLabels(labels, mergedPullRequest.labels)
+        ) {
+          return false;
+        }
+
+        const branchName = BranchName.parse(mergedPullRequest.headRefName);
+        if (!branchName) {
+          return false;
+        }
+
+        // If branchPrefix is specified, ensure it is found in the branch name.
+        // If branchPrefix is not specified, component should also be undefined.
+        if (branchName.getComponent() !== branchPrefix) {
+          return false;
+        }
+
+        // In this implementation we expect to have a release version
+        const version = branchName.getVersion();
+        if (!version) {
+          return false;
         }
 
         // What's left by now should just be the version string.
         // Check for pre-releases if needed.
-        if (!preRelease && version.indexOf('-') >= 0) continue;
+        if (!preRelease && version.indexOf('-') >= 0) {
+          return false;
+        }
 
         // Make sure we did get a valid semver.
         const normalizedVersion = semver.valid(version);
-        if (!normalizedVersion) continue;
+        if (!normalizedVersion) {
+          return false;
+        }
 
-        return {
-          number: pull.number,
-          sha: pull.merge_commit_sha,
-          version: normalizedVersion,
-        } as GitHubReleasePR;
-      }
-    }
-    return undefined;
+        return true;
+      },
+      maxResults
+    );
+    return mergedCommit?.pullRequest;
   }
 
   private hasAllLabels(labelsA: string[], labelsB: string[]) {
@@ -638,9 +1090,7 @@ export class GitHub {
 
     const openReleasePRs: PullsListResponseItems = [];
     const pullsResponse = (await this.request(
-      `GET /repos/:owner/:repo/pulls?state=open&per_page=${perPage}${
-        this.proxyKey ? `&key=${this.proxyKey}` : ''
-      }`,
+      `GET /repos/:owner/:repo/pulls?state=open&per_page=${perPage}`,
       {
         owner: this.owner,
         repo: this.repo,
@@ -665,24 +1115,28 @@ export class GitHub {
     return openReleasePRs;
   }
 
-  async addLabels(labels: string[], pr: number) {
-    checkpoint(
+  async addLabels(labels: string[], pr: number): Promise<boolean> {
+    // If the PR is being created from a fork, it will not have permission
+    // to add and remove labels from the PR:
+    if (this.fork) {
+      logger.error(
+        'release labels were not added, due to PR being created from fork'
+      );
+      return false;
+    }
+
+    logger.info(
       `adding label ${chalk.green(labels.join(','))} to https://github.com/${
         this.owner
-      }/${this.repo}/pull/${pr}`,
-      CheckpointType.Success
+      }/${this.repo}/pull/${pr}`
     );
-    return this.request(
-      `POST /repos/:owner/:repo/issues/:issue_number/labels${
-        this.proxyKey ? `?key=${this.proxyKey}` : ''
-      }`,
-      {
-        owner: this.owner,
-        repo: this.repo,
-        issue_number: pr,
-        labels,
-      }
-    );
+    await this.request('POST /repos/:owner/:repo/issues/:issue_number/labels', {
+      owner: this.owner,
+      repo: this.repo,
+      issue_number: pr,
+      labels,
+    });
+    return true;
   }
 
   async findExistingReleaseIssue(
@@ -695,7 +1149,7 @@ export class GitHub {
           method: 'GET',
           url: `/repos/${this.owner}/${this.repo}/issues?labels=${labels.join(
             ','
-          )}${this.proxyKey ? `&key=${this.proxyKey}` : ''}`,
+          )}`,
           per_page: 100,
         })
       )) {
@@ -735,60 +1189,51 @@ export class GitHub {
 
     // Short-circuit if there have been no changes to the pull-request body.
     if (openReleasePR && openReleasePR.body === options.body) {
-      checkpoint(
-        `PR https://github.com/${this.owner}/${this.repo}/pull/${openReleasePR.number} remained the same`,
-        CheckpointType.Failure
+      logger.error(
+        `PR https://github.com/${this.owner}/${this.repo}/pull/${openReleasePR.number} remained the same`
       );
       return undefined;
     }
 
-    //  Actually update the files for the release:
-    const changes = await this.getChangeSet(options.updates, defaultBranch);
-    const prNumber = await createPullRequest(
-      this.octokit,
-      changes,
-      {
-        upstreamOwner: this.owner,
-        upstreamRepo: this.repo,
-        title: options.title,
-        branch: options.branch,
-        description: options.body,
-        primary: defaultBranch,
-        force: true,
-        fork: options.fork,
-        message: options.title,
-      },
-      {level: 'error'}
-    );
+    //  Update the files for the release if not already supplied
+    const changes =
+      options.changes ??
+      (await this.getChangeSet(options.updates, defaultBranch));
+    const prNumber = await createPullRequest(this.octokit, changes, {
+      upstreamOwner: this.owner,
+      upstreamRepo: this.repo,
+      title: options.title,
+      branch: options.branch,
+      description: options.body,
+      primary: defaultBranch,
+      force: true,
+      fork: this.fork,
+      message: options.title,
+      logger: logger,
+    });
 
     // If a release PR was already open, update the title and body:
     if (openReleasePR) {
-      checkpoint(
+      logger.info(
         `update pull-request #${openReleasePR.number}: ${chalk.yellow(
           options.title
-        )}`,
-        CheckpointType.Success
+        )}`
       );
-      await this.request(
-        `PATCH /repos/:owner/:repo/pulls/:pull_number${
-          this.proxyKey ? `?key=${this.proxyKey}` : ''
-        }`,
-        {
-          pull_number: openReleasePR.number,
-          owner: this.owner,
-          repo: this.repo,
-          title: options.title,
-          body: options.body,
-          state: 'open',
-        }
-      );
+      await this.request('PATCH /repos/:owner/:repo/pulls/:pull_number', {
+        pull_number: openReleasePR.number,
+        owner: this.owner,
+        repo: this.repo,
+        title: options.title,
+        body: options.body,
+        state: 'open',
+      });
       return openReleasePR.number;
     } else {
       return prNumber;
     }
   }
 
-  private async getChangeSet(
+  async getChangeSet(
     updates: Update[],
     defaultBranch: string
   ): Promise<Changes> {
@@ -812,10 +1257,7 @@ export class GitHub {
         // if the file is missing and create = false, just continue
         // to the next update, otherwise create the file.
         if (!update.create) {
-          checkpoint(
-            `file ${chalk.green(update.path)} did not exist`,
-            CheckpointType.Failure
-          );
+          logger.error(`file ${chalk.green(update.path)} did not exist`);
           continue;
         }
       }
@@ -839,40 +1281,61 @@ export class GitHub {
     return `${this.owner}:${baseBranch}`;
   }
 
+  /**
+   * Returns the branch we are targetting for releases. Defaults
+   * to the repository's default/primary branch.
+   *
+   * @returns {string}
+   */
   async getDefaultBranch(): Promise<string> {
-    if (this.defaultBranch) {
-      return this.defaultBranch;
+    if (!this.defaultBranch) {
+      this.defaultBranch = await this.getRepositoryDefaultBranch();
     }
+    return this.defaultBranch;
+  }
+
+  /**
+   * Returns the repository's default/primary branch.
+   *
+   * @returns {string}
+   */
+  async getRepositoryDefaultBranch(): Promise<string> {
+    if (this.repositoryDefaultBranch) {
+      return this.repositoryDefaultBranch;
+    }
+
     const {data} = await this.octokit.repos.get({
       repo: this.repo,
       owner: this.owner,
       headers: {
-        Authorization: `${this.proxyKey ? '' : 'token '}${this.token}`,
+        Authorization: `token ${this.token}`,
       },
     });
-    this.defaultBranch = (data as {default_branch: string}).default_branch;
-    return this.defaultBranch as string;
+    this.repositoryDefaultBranch = (
+      data as {
+        default_branch: string;
+      }
+    ).default_branch;
+    return this.repositoryDefaultBranch as string;
   }
 
-  async closePR(prNumber: number) {
-    await this.request(
-      `PATCH /repos/:owner/:repo/pulls/:pull_number${
-        this.proxyKey ? `?key=${this.proxyKey}` : ''
-      }`,
-      {
-        owner: this.owner,
-        repo: this.repo,
-        pull_number: prNumber,
-        state: 'closed',
-      }
-    );
+  async closePR(prNumber: number): Promise<boolean> {
+    if (this.fork) return false;
+
+    await this.request('PATCH /repos/:owner/:repo/pulls/:pull_number', {
+      owner: this.owner,
+      repo: this.repo,
+      pull_number: prNumber,
+      state: 'closed',
+    });
+    return true;
   }
 
   // Takes a potentially unqualified branch name, and turns it
   // into a fully qualified ref.
   //
   // e.g. main -> refs/heads/main
-  static qualifyRef(refName: string): string {
+  static fullyQualifyBranchRef(refName: string): string {
     let final = refName;
     if (final.indexOf('/') < 0) {
       final = `refs/heads/${final}`;
@@ -883,19 +1346,18 @@ export class GitHub {
 
   async getFileContentsWithSimpleAPI(
     path: string,
-    branch: string
+    ref: string,
+    isBranch = true
   ): Promise<GitHubFileContents> {
-    const ref = GitHub.qualifyRef(branch);
+    ref = isBranch ? GitHub.fullyQualifyBranchRef(ref) : ref;
     const options: RequestOptionsType = {
       owner: this.owner,
       repo: this.repo,
       path,
+      ref,
     };
-    if (ref) options.ref = ref;
     const resp = await this.request(
-      `GET /repos/:owner/:repo/contents/:path${
-        this.proxyKey ? `?key=${this.proxyKey}` : ''
-      }`,
+      'GET /repos/:owner/:repo/contents/:path',
       options
     );
     return {
@@ -915,9 +1377,7 @@ export class GitHub {
       branch,
     };
     const repoTree: OctokitResponse<GitGetTreeResponse> = await this.request(
-      `GET /repos/:owner/:repo/git/trees/:branch${
-        this.proxyKey ? `?key=${this.proxyKey}` : ''
-      }`,
+      'GET /repos/:owner/:repo/git/trees/:branch',
       options
     );
 
@@ -926,16 +1386,11 @@ export class GitHub {
       throw new Error(`Could not find requested path: ${path}`);
     }
 
-    const resp = await this.request(
-      `GET /repos/:owner/:repo/git/blobs/:sha${
-        this.proxyKey ? `?key=${this.proxyKey}` : ''
-      }`,
-      {
-        owner: this.owner,
-        repo: this.repo,
-        sha: blobDescriptor.sha,
-      }
-    );
+    const resp = await this.request('GET /repos/:owner/:repo/git/blobs/:sha', {
+      owner: this.owner,
+      repo: this.repo,
+      sha: blobDescriptor.sha,
+    });
 
     return {
       parsedContent: Buffer.from(resp.data.content, 'base64').toString('utf8'),
@@ -972,38 +1427,33 @@ export class GitHub {
     releaseNotes: string,
     draft: boolean
   ): Promise<ReleaseCreateResponse> {
-    checkpoint(`creating release ${tagName}`, CheckpointType.Success);
+    logger.info(`creating release ${tagName}`);
+    const name = packageName ? `${packageName} ${tagName}` : tagName;
     return (
-      await this.request(
-        `POST /repos/:owner/:repo/releases${
-          this.proxyKey ? `?key=${this.proxyKey}` : ''
-        }`,
-        {
-          owner: this.owner,
-          repo: this.repo,
-          tag_name: tagName,
-          target_commitish: sha,
-          body: releaseNotes,
-          name: `${packageName} ${tagName}`,
-          draft: draft,
-        }
-      )
+      await this.request('POST /repos/:owner/:repo/releases', {
+        owner: this.owner,
+        repo: this.repo,
+        tag_name: tagName,
+        target_commitish: sha,
+        body: releaseNotes,
+        name,
+        draft: draft,
+      })
     ).data;
   }
 
-  async removeLabels(labels: string[], prNumber: number) {
+  async removeLabels(labels: string[], prNumber: number): Promise<boolean> {
+    if (this.fork) return false;
+
     for (let i = 0, label; i < labels.length; i++) {
       label = labels[i];
-      checkpoint(
+      logger.info(
         `removing label ${chalk.green(label)} from ${chalk.green(
           '' + prNumber
-        )}`,
-        CheckpointType.Success
+        )}`
       );
       await this.request(
-        `DELETE /repos/:owner/:repo/issues/:issue_number/labels/:name${
-          this.proxyKey ? `?key=${this.proxyKey}` : ''
-        }`,
+        'DELETE /repos/:owner/:repo/issues/:issue_number/labels/:name',
         {
           owner: this.owner,
           repo: this.repo,
@@ -1012,6 +1462,7 @@ export class GitHub {
         }
       );
     }
+    return true;
   }
 
   normalizePrefix(prefix: string) {
@@ -1155,6 +1606,32 @@ export class GitHub {
       await this.getDefaultBranch(),
       prefix
     );
+  }
+
+  /**
+   * Makes a comment on a issue/pull request.
+   *
+   * @param {string} comment - The body of the comment to post.
+   * @param {number} number - The issue or pull request number.
+   */
+  async commentOnIssue(
+    comment: string,
+    number: number
+  ): Promise<CreateIssueCommentResponse> {
+    logger.info(
+      `adding comment to https://github.com/${this.owner}/${this.repo}/issue/${number}`
+    );
+    return (
+      await this.request(
+        'POST /repos/:owner/:repo/issues/:issue_number/comments',
+        {
+          owner: this.owner,
+          repo: this.repo,
+          issue_number: number,
+          body: comment,
+        }
+      )
+    ).data;
   }
 }
 
