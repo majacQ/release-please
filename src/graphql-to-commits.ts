@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import {GitHub} from './github';
+import {PageInfo, GitHub} from './github';
 
 const CONVENTIONAL_COMMIT_REGEX = /^[\w]+(\(\w+\))?!?: /;
 
@@ -33,7 +33,13 @@ export interface Commit {
 // define what the expected GraphQL response looks like.
 
 interface CommitHistoryGraphQLResponse {
-  repository: {defaultBranchRef: {target: {history: CommitHistory}}};
+  repository: {
+    ref: {
+      target: {
+        history: CommitHistory;
+      };
+    };
+  };
 }
 
 interface CommitHistory {
@@ -66,17 +72,11 @@ interface LabelEdge {
   node: {name: string};
 }
 
-interface PageInfo {
-  endCursor: string;
-  hasNextPage: boolean;
-}
-
 export async function graphqlToCommits(
   github: GitHub,
   response: CommitHistoryGraphQLResponse
 ): Promise<CommitsResponse> {
-  const commitHistory: CommitHistory =
-    response.repository.defaultBranchRef.target.history;
+  const commitHistory: CommitHistory = response.repository.ref.target.history;
   const commits: CommitsResponse = {
     endCursor: commitHistory.pageInfo.endCursor,
     hasNextPage: commitHistory.pageInfo.hasNextPage,
@@ -121,18 +121,7 @@ async function graphqlToCommit(
 
   let prEdge: PREdge = commitEdge.node.associatedPullRequests.edges[0];
 
-  // if the commit.sha and mergeCommit.oid do not match, assume that this
-  // was a push directly to the default branch.
-  //
-  // TODO: investigate our motivations for skipping commits when
-  // commitEdge.node.oid and prEdge.node.mergeCommit.oid do not match (this
-  // caused issues for the legitimate use-case of merge commits.
-  if (
-    !commit.sha ||
-    !prEdge.node.mergeCommit ||
-    (commit.sha !== prEdge.node.mergeCommit.oid &&
-      !observedSHAs.has(prEdge.node.mergeCommit.oid))
-  ) {
+  if (!commit.sha) {
     return undefined;
   }
   observedSHAs.add(commit.sha);

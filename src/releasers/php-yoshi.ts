@@ -50,9 +50,8 @@ interface PHPYoshiBulkUpdate {
 }
 
 export class PHPYoshi extends ReleasePR {
-  static releaserName = 'php-yoshi';
-  protected async _run() {
-    const latestTag: GitHubTag | undefined = await this.gh.latestTag();
+  protected async _run(): Promise<number | undefined> {
+    const latestTag: GitHubTag | undefined = await this.latestTag();
     const commits: Commit[] = await this.commits({
       sha: latestTag ? latestTag.sha : undefined,
     });
@@ -61,7 +60,8 @@ export class PHPYoshi extends ReleasePR {
     // top-level tag version we maintain on the mono-repo itself.
     const ccb = new ConventionalCommits({
       commits,
-      githubRepoUrl: this.repoUrl,
+      owner: this.gh.owner,
+      repository: this.gh.repo,
       bumpMinorPreMajor: true,
       changelogSections: CHANGELOG_SECTIONS,
     });
@@ -83,6 +83,7 @@ export class PHPYoshi extends ReleasePR {
     );
     changelogEntry = bulkUpdate.changelogEntry;
 
+    const packageName = await this.getPackageName();
     // update the aggregate package information in the root
     // composer.json and manifest.json.
     updates.push(
@@ -91,7 +92,7 @@ export class PHPYoshi extends ReleasePR {
         changelogEntry,
         version: candidate.version,
         versions: bulkUpdate.versionUpdates,
-        packageName: this.packageName,
+        packageName: packageName.name,
       })
     );
 
@@ -101,16 +102,16 @@ export class PHPYoshi extends ReleasePR {
         changelogEntry,
         version: candidate.version,
         versions: bulkUpdate.versionUpdates,
-        packageName: this.packageName,
+        packageName: packageName.name,
       })
     );
 
     updates.push(
       new Changelog({
-        path: 'CHANGELOG.md',
+        path: this.changelogPath,
         changelogEntry,
         version: candidate.version,
-        packageName: this.packageName,
+        packageName: packageName.name,
       })
     );
 
@@ -120,12 +121,12 @@ export class PHPYoshi extends ReleasePR {
           path,
           changelogEntry,
           version: candidate.version,
-          packageName: this.packageName,
+          packageName: packageName.name,
         })
       );
     });
 
-    await this.openPR({
+    return await this.openPR({
       sha: commits[0].sha!,
       changelogEntry,
       updates,
@@ -152,7 +153,8 @@ export class PHPYoshi extends ReleasePR {
       const pkgKey: string = pkgKeys[i];
       const cc = new ConventionalCommits({
         commits: commitLookup[pkgKey],
-        githubRepoUrl: this.repoUrl,
+        owner: this.gh.owner,
+        repository: this.gh.repo,
         bumpMinorPreMajor: this.bumpMinorPreMajor,
         changelogSections: CHANGELOG_SECTIONS,
       });
@@ -193,12 +195,13 @@ export class PHPYoshi extends ReleasePR {
             await cc.generateChangelogEntry({version: candidate})
           );
 
+          const packageName = await this.getPackageName();
           updates.push(
             new Version({
               path: `${pkgKey}/VERSION`,
               changelogEntry,
               version: candidate,
-              packageName: this.packageName,
+              packageName: packageName.name,
               contents,
             })
           );
@@ -215,7 +218,7 @@ export class PHPYoshi extends ReleasePR {
                 path: `${pkgKey}/${meta.extra.component.entry}`,
                 changelogEntry,
                 version: candidate,
-                packageName: this.packageName,
+                packageName: packageName.name,
               })
             );
           }

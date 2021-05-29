@@ -14,35 +14,73 @@
 
 import {ReleasePR} from '../release-pr';
 
-import {readdirSync} from 'fs';
-import {dirname} from 'path';
+import {GoYoshi} from './go-yoshi';
+import {JavaBom} from './java-bom';
+import {JavaLTS} from './java-lts';
+import {JavaYoshi} from './java-yoshi';
+import {Node} from './node';
+import {PHPYoshi} from './php-yoshi';
+import {Python} from './python';
+import {RubyYoshi} from './ruby-yoshi';
+import {Ruby} from './ruby';
+import {Simple} from './simple';
+import {TerraformModule} from './terraform-module';
+import {Rust} from './rust';
+import {OCaml} from './ocaml';
+import {Helm} from './helm';
 
-// dynamically load all the releasers in the folder, and index based on their
-// releaserName property:
-export function getReleasers(): {[key: string]: typeof ReleasePR} {
-  const releasers: {[key: string]: typeof ReleasePR} = {};
-  const root = dirname(require.resolve('./'));
-  for (const file of readdirSync(root, {withFileTypes: true})) {
-    if (
-      file.isFile() &&
-      !file.name.match(/.*\.ts.*/) &&
-      !file.name.match(/.*\.map$/) &&
-      !file.name.match(/index\.js/)
-    ) {
-      const obj = require(`./${file.name}`) as {
-        [key: string]: typeof ReleasePR;
-      };
-      const releaser = obj[Object.keys(obj)[0]];
-      releasers[releaser.releaserName] = releaser;
-    }
-  }
+// add any new releasers you create to this type as well as the `releasers`
+// object below.
+export type ReleaseType =
+  | 'go'
+  | 'go-yoshi'
+  | 'java-bom'
+  | 'java-lts'
+  | 'java-yoshi'
+  | 'node'
+  | 'ocaml'
+  | 'php-yoshi'
+  | 'python'
+  | 'ruby'
+  | 'ruby-yoshi'
+  | 'rust'
+  | 'simple'
+  | 'terraform-module'
+  | 'helm';
+
+type Releasers = Record<ReleaseType, typeof ReleasePR>;
+
+const releasers: Releasers = {
+  go: GoYoshi, // TODO(codyoss): refactor this into a more generic go strategy.
+  'go-yoshi': GoYoshi,
+  'java-bom': JavaBom,
+  'java-lts': JavaLTS,
+  'java-yoshi': JavaYoshi,
+  node: Node,
+  ocaml: OCaml,
+  'php-yoshi': PHPYoshi,
+  python: Python,
+  ruby: Ruby,
+  'ruby-yoshi': RubyYoshi,
+  rust: Rust,
+  simple: Simple,
+  'terraform-module': TerraformModule,
+  helm: Helm,
+};
+
+export function getReleasers(): Releasers {
   return releasers;
 }
 
+// deprecated, use getReleaserTypes
 export function getReleaserNames(): string[] {
-  const releasers = getReleasers();
-  return Object.keys(releasers).map(key => {
-    const releaser = releasers[key];
-    return releaser.releaserName;
-  });
+  return getReleaserTypes() as string[];
+}
+
+export function getReleaserTypes(): readonly ReleaseType[] {
+  const names: ReleaseType[] = [];
+  for (const releaseType of Object.keys(releasers)) {
+    names.push(releaseType as ReleaseType);
+  }
+  return names;
 }

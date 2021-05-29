@@ -6,7 +6,7 @@
 [![codecov](https://img.shields.io/codecov/c/github/googleapis/release-please/master.svg?style=flat)](https://codecov.io/gh/googleapis/release-please)
 
 Release Please automates CHANGELOG generation, the creation of GitHub releases,
-and version bumps for your projects. 
+and version bumps for your projects.
 
 It does so by parsing your
 git history, looking for [Conventional Commit messages](https://www.conventionalcommits.org/),
@@ -28,11 +28,52 @@ Release Please assumes you are using [Conventional Commit messages](https://www.
 
 The most important prefixes you should have in mind are:
 
-* `fix:` which represents bug fixes, and correlates to a [SemVer](https://semver.org/) 
+* `fix:` which represents bug fixes, and correlates to a [SemVer](https://semver.org/)
   patch.
 * `feat:` which represents a new feature, and correlates to a SemVer minor.
 * `feat!:`,  or `fix!:`, `refactor!:`, etc., which represent a breaking change
   (indicated by the `!`) and will result in a SemVer major.
+
+### What if my PR contains multiple fixes or features?
+
+Release Please allows you to represent multiple changes in a single commit,
+using footers:
+
+```txt
+feat: adds v4 UUID to crypto
+
+This adds support for v4 UUIDs to the library.
+
+fix(utils): unicode no longer throws exception
+  PiperOrigin-RevId: 345559154
+  BREAKING-CHANGE: encode method no longer throws.
+  Source-Link: googleapis/googleapis@5e0dcb2
+
+feat(utils): update encode to support unicode
+  PiperOrigin-RevId: 345559182
+  Source-Link: googleapis/googleapis@e5eef86
+```
+
+The above commit message will contain:
+
+1. an entry for the **"adds v4 UUID to crypto"** feature.
+2. an entry for the fix **"unicode no longer throws exception"**, along with a note
+  that it's a breaking change.
+3. an entry for the feature **"update encode to support unicode"**.
+
+## How do I change the version number?
+
+When a commit to the main branch has `Release-As: x.x.x`(case insensitive) in the **commit body**, Release Please will open a new pull request for the specified version.
+
+**Empty commit example:**
+
+`git commit --allow-empty -m "chore: release 2.0.0" -m "Release-As: 2.0.0"` results in the following commit message:
+
+```txt
+chore: release 2.0.0
+
+Release-As: 2.0.0
+```
 
 ## Release types supported
 
@@ -43,7 +84,10 @@ Release Please automates releases for the following flavors of repositories:
 | node              | [A Node.js repository, with a package.json and CHANGELOG.md](https://github.com/yargs/yargs) |
 | python            | [A Python repository, with a setup.py, setup.cfg, and CHANGELOG.md](https://github.com/googleapis/python-storage) |
 | terraform-module  | [A terraform module, with a version in the README.md, and a CHANGELOG.md](https://github.com/terraform-google-modules/terraform-google-project-factory) |
+| rust              | A Rust repository, with a Cargo.toml (either as a crate or workspace) and a CHANGELOG.md |
+| ocaml             | [An OCaml repository, containing 1 or more opam or esy files and a CHANGELOG.md](https://github.com/grain-lang/binaryen.ml) |
 | simple            | [A repository with a version.txt and a CHANGELOG.md](https://github.com/googleapis/gapic-generator) |
+| helm              | A repository with a Chart.yaml and a CHANGELOG.md |
 
 ## Adding additional release types
 
@@ -76,7 +120,7 @@ The easiest way to run release please is as a GitHub action:
       release-please:
         runs-on: ubuntu-latest
         steps:
-          - uses: GoogleCloudPlatform/release-please-action@v1.3.0
+          - uses: GoogleCloudPlatform/release-please-action@v2
             with:
               token: ${{ secrets.GITHUB_TOKEN }}
               release-type: node
@@ -103,7 +147,7 @@ jobs:
   release-please:
     runs-on: ubuntu-latest
     steps:
-      - uses: GoogleCloudPlatform/release-please-action@v1.3.0
+      - uses: GoogleCloudPlatform/release-please-action@v2
         id: release
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
@@ -119,6 +163,7 @@ jobs:
           node-version: 12
           registry-url: 'https://registry.npmjs.org'
         if: ${{ steps.release.outputs.release_created }}
+      # if you are using Yarn, substitute the command below with `yarn install --frozen-lockfile`
       - run: npm ci
         if: ${{ steps.release.outputs.release_created }}
       - run: npm publish
@@ -154,6 +199,7 @@ release-please release-pr --package-name=@google-cloud/firestore" \
 | `--default-branch`| branch to open pull release PR against (detected by default). |
 | `--path`          | create a release from a path other than the repository's root |
 | `--monorepo-tags` | add prefix to tags and branches, allowing multiple libraries to be released from the same repository. |
+| `--pull-request-title-pattern` | add title pattern to make release PR, defaults to using `chore${scope}: release${component} ${version}`. |
 
 ### Creating a release on GitHub
 

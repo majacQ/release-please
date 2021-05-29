@@ -23,7 +23,6 @@ export class SetupPy implements Update {
   packageName: string;
   create: boolean;
   contents?: GitHubFileContents;
-  skipCi?: boolean;
 
   constructor(options: UpdateOptions) {
     this.create = false;
@@ -31,12 +30,11 @@ export class SetupPy implements Update {
     this.changelogEntry = options.changelogEntry;
     this.version = options.version;
     this.packageName = options.packageName;
-    this.skipCi = options.skipCi;
   }
   updateContent(content: string): string {
     return content.replace(
-      /version ?= ?["'][0-9]+\.[0-9]+\.[0-9](-\w+)?["']/,
-      `version = "${this.version}"`
+      /(version ?= ?["'])[0-9]+\.[0-9]+\.[0-9](?:-\w+)?(["'])/,
+      `$1${this.version}$2`
     );
   }
 }

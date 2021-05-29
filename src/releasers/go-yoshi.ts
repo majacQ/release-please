@@ -13,15 +13,12 @@
 // limitations under the License.
 
 import {ReleasePR, ReleaseCandidate} from '../release-pr';
+import {ConventionalChangelogCommit} from '@conventional-commits/parser';
 
 import {ConventionalCommits} from '../conventional-commits';
-import {GitHubTag} from '../github';
 import {checkpoint, CheckpointType} from '../util/checkpoint';
 import {Update} from '../updaters/update';
 import {Commit} from '../graphql-to-commits';
-
-import {ReleaseType} from 'semver';
-import * as semver from 'semver';
 
 // Generic
 import {Changelog} from '../updaters/changelog';
@@ -35,19 +32,22 @@ const SUB_MODULES = [
   'firestore',
   'logging',
   'pubsub',
+  'pubsublite',
   'spanner',
   'storage',
 ];
-const GAPIC_PR_REGEX = /.*auto-regenerate gapics.*/;
+const REGEN_PR_REGEX = /.*auto-regenerate.*/;
 
 export class GoYoshi extends ReleasePR {
-  static releaserName = 'go-yoshi';
-  protected async _run() {
-    const scopeRe = /^\w+\((?<scope>.*)\):/;
-    const latestTag = await this.gh.latestTag(
-      this.monorepoTags ? `${this.packageName}-` : undefined
+  changelogPath = 'CHANGES.md';
+
+  protected async _run(): Promise<number | undefined> {
+    const packageName = await this.getPackageName();
+    const latestTag = await this.latestTag(
+      this.monorepoTags ? `${packageName.getComponent()}-` : undefined,
+      false
     );
-    let gapicPR: Commit | undefined;
+    let regenPR: Commit | undefined;
     let sha: null | string = null;
     const commits = (
       await this.commits({
@@ -55,66 +55,58 @@ export class GoYoshi extends ReleasePR {
         path: this.path,
       })
     ).filter(commit => {
-      // Filter commits that don't have a scope as we don't know where to put
-      // them.
-      const scope = commit.message.match(scopeRe)?.groups?.scope;
-      if (!scope) {
-        return false;
-      }
-      // Skipping commits related to sub-modules as they are not apart of the
-      // parent module.
-      for (const subModule of SUB_MODULES) {
-        if (scope === subModule || scope.startsWith(subModule + '/')) {
-          // TODO(codyoss): eventually gather these commits into a map so we can
-          // purpose releases for sub-modules.
-          return false;
-        }
-      }
       // Store the very first SHA returned, this represents the HEAD of the
       // release being created:
       if (!sha) {
         sha = commit.sha;
       }
-      // Only have a single entry of the nightly regen listed in the changelog.
-      // If there are more than one of these commits, append associated PR.
-      if (GAPIC_PR_REGEX.test(commit.message)) {
+
+      if (
+        this.gh.repo === 'google-api-go-client' &&
+        REGEN_PR_REGEX.test(commit.message)
+      ) {
+        // Only have a single entry of the nightly regen listed in the changelog.
+        // If there are more than one of these commits, append associated PR.
         const issueRe = /(?<prefix>.*)\((?<pr>.*)\)(\n|$)/;
-        if (gapicPR) {
+        if (regenPR) {
           const match = commit.message.match(issueRe);
           if (match?.groups?.pr) {
-            gapicPR.message += `\nRefs ${match.groups.pr}`;
+            regenPR.message += `\nRefs ${match.groups.pr}`;
           }
           return false;
         } else {
           // Throw away the sha for nightly regens, will just append PR numbers.
           commit.sha = null;
-          gapicPR = commit;
+          regenPR = commit;
+
           const match = commit.message.match(issueRe);
           if (match?.groups?.pr) {
-            gapicPR.message = `${match.groups.prefix}\n\nRefs ${match.groups.pr}`;
+            regenPR.message = `${match.groups.prefix}\n\nRefs ${match.groups.pr}`;
           }
         }
       }
       return true;
     });
-
     const cc = new ConventionalCommits({
       commits: commits,
-      githubRepoUrl: this.repoUrl,
+      owner: this.gh.owner,
+      repository: this.gh.repo,
       bumpMinorPreMajor: this.bumpMinorPreMajor,
+      commitFilter: this.filterSubModuleCommits(this.gh.repo, packageName.name),
     });
     const candidate: ReleaseCandidate = await this.coerceReleaseCandidate(
       cc,
       latestTag
     );
-
     // "closes" is a little presumptuous, let's just indicate that the
     // PR references these other commits:
     const changelogEntry: string = (
       await cc.generateChangelogEntry({
         version: candidate.version,
-        currentTag: `v${candidate.version}`,
-        previousTag: candidate.previousTag,
+        currentTag: await this.normalizeTagName(candidate.version),
+        previousTag: candidate.previousTag
+          ? await this.normalizeTagName(candidate.previousTag)
+          : undefined,
       })
     ).replace(/, closes /g, ', refs ');
 
@@ -128,23 +120,23 @@ export class GoYoshi extends ReleasePR {
         }`,
         CheckpointType.Failure
       );
-      return;
+      return undefined;
     }
 
     const updates: Update[] = [];
 
     updates.push(
       new Changelog({
-        path: this.addPath('CHANGES.md'),
+        path: this.addPath(this.changelogPath),
         changelogEntry,
         version: candidate.version,
-        packageName: this.packageName,
+        packageName: packageName.name,
       })
     );
     if (!sha) {
       throw Error('no sha found for pull request');
     }
-    await this.openPR({
+    return await this.openPR({
       sha: sha!,
       changelogEntry,
       updates,
@@ -153,20 +145,50 @@ export class GoYoshi extends ReleasePR {
     });
   }
 
-  protected async coerceReleaseCandidate(
-    cc: ConventionalCommits,
-    latestTag: GitHubTag | undefined
-  ): Promise<ReleaseCandidate> {
-    const version = latestTag
-      ? latestTag.version
-      : this.defaultInitialVersion();
-    const previousTag = latestTag ? latestTag.name : undefined;
-    const bump: ReleaseType = 'minor';
-    const candidate: string | null = semver.inc(version, bump);
-    return {version: candidate as string, previousTag};
+  private isGapicRepo(repo: string): boolean {
+    return repo === 'google-cloud-go';
   }
 
-  protected defaultInitialVersion(): string {
+  private isMultiClientRepo(repo: string): boolean {
+    return repo === 'google-cloud-go' || repo === 'google-api-go-client';
+  }
+
+  defaultInitialVersion(): string {
     return '0.1.0';
+  }
+
+  tagSeparator(): string {
+    return '/';
+  }
+
+  private filterSubModuleCommits(
+    repo: string,
+    packageName: string
+  ): (c: ConventionalChangelogCommit) => boolean {
+    return (c: ConventionalChangelogCommit) => {
+      if (this.isGapicRepo(repo)) {
+        // Filter commits that don't have a scope as we don't know where to put
+        // them.
+        if (!c.scope) {
+          return true;
+        }
+        // Skipping commits related to sub-modules as they are not apart of the
+        // parent module.
+        if (!this.monorepoTags) {
+          for (const subModule of SUB_MODULES) {
+            if (c.scope === subModule || c.scope.startsWith(subModule + '/')) {
+              return true;
+            }
+          }
+        } else {
+          if (
+            !(c.scope === packageName || c.scope.startsWith(packageName + '/'))
+          ) {
+            return true;
+          }
+        }
+      }
+      return false;
+    };
   }
 }

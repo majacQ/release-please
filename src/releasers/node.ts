@@ -12,10 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import {ReleasePR, ReleaseCandidate} from '../release-pr';
+import {
+  ReleasePR,
+  ReleaseCandidate,
+  OpenPROptions,
+  PackageName,
+} from '../release-pr';
 
 import {ConventionalCommits} from '../conventional-commits';
-import {GitHub, GitHubTag, GitHubFileContents} from '../github';
+import {GitHubTag, GitHubFileContents} from '../github';
 import {checkpoint, CheckpointType} from '../util/checkpoint';
 import {Update} from '../updaters/update';
 import {Commit} from '../graphql-to-commits';
@@ -27,20 +32,20 @@ import {PackageJson} from '../updaters/package-json';
 import {SamplesPackageJson} from '../updaters/samples-package-json';
 
 export class Node extends ReleasePR {
-  static releaserName = 'node';
-  protected async _run() {
-    const latestTag: GitHubTag | undefined = await this.gh.latestTag(
-      this.monorepoTags ? `${this.packageName}-` : undefined
-    );
-    const commits: Commit[] = await this.commits({
-      sha: latestTag ? latestTag.sha : undefined,
-      path: this.path,
-    });
+  private pkgJsonContents?: GitHubFileContents;
+  private _packageName?: string;
 
+  protected async _getOpenPROptions(
+    commits: Commit[],
+    latestTag?: GitHubTag
+  ): Promise<OpenPROptions | undefined> {
     const cc = new ConventionalCommits({
       commits,
-      githubRepoUrl: this.repoUrl,
+      owner: this.gh.owner,
+      repository: this.gh.repo,
       bumpMinorPreMajor: this.bumpMinorPreMajor,
+      bumpPatchForMinorPreMajor: this.bumpPatchForMinorPreMajor,
+      changelogSections: this.changelogSections,
     });
     const candidate: ReleaseCandidate = await this.coerceReleaseCandidate(
       cc,
@@ -48,8 +53,10 @@ export class Node extends ReleasePR {
     );
     const changelogEntry: string = await cc.generateChangelogEntry({
       version: candidate.version,
-      currentTag: `v${candidate.version}`,
-      previousTag: candidate.previousTag,
+      currentTag: await this.normalizeTagName(candidate.version),
+      previousTag: candidate.previousTag
+        ? await this.normalizeTagName(candidate.previousTag)
+        : undefined,
     });
 
     // don't create a release candidate until user facing changes
@@ -62,25 +69,18 @@ export class Node extends ReleasePR {
         }`,
         CheckpointType.Failure
       );
-      return;
+      return undefined;
     }
 
     const updates: Update[] = [];
 
-    // Make an effort to populate packageName from the contents of
-    // the package.json, rather than forcing this to be set:
-    const contents: GitHubFileContents = await this.gh.getFileContents(
-      this.addPath('package.json')
-    );
-    const pkg = JSON.parse(contents.parsedContent);
-    if (pkg.name) this.packageName = pkg.name;
-
+    const packageName = (await this.getPackageName()).name;
     updates.push(
       new PackageJson({
         path: this.addPath('package-lock.json'),
         changelogEntry,
         version: candidate.version,
-        packageName: this.packageName,
+        packageName,
       })
     );
 
@@ -89,16 +89,16 @@ export class Node extends ReleasePR {
         path: this.addPath('samples/package.json'),
         changelogEntry,
         version: candidate.version,
-        packageName: this.packageName,
+        packageName,
       })
     );
 
     updates.push(
       new Changelog({
-        path: this.addPath('CHANGELOG.md'),
+        path: this.addPath(this.changelogPath),
         changelogEntry,
         version: candidate.version,
-        packageName: this.packageName,
+        packageName,
       })
     );
 
@@ -107,31 +107,54 @@ export class Node extends ReleasePR {
         path: this.addPath('package.json'),
         changelogEntry,
         version: candidate.version,
-        packageName: this.packageName,
-        contents,
+        packageName,
+        contents: await this.getPkgJsonContents(),
       })
     );
-
-    await this.openPR({
+    return {
       sha: commits[0].sha!,
       changelogEntry: `${changelogEntry}\n---\n`,
       updates,
       version: candidate.version,
       includePackageName: this.monorepoTags,
-    });
+    };
   }
 
-  // A releaser can implement this method to automatically detect
-  // the release name when creating a GitHub release, for instance by returning
-  // name in package.json, or setup.py.
-  static async lookupPackageName(gh: GitHub): Promise<string | undefined> {
-    // Make an effort to populate packageName from the contents of
-    // the package.json, rather than forcing this to be set:
-    const contents: GitHubFileContents = await gh.getFileContents(
-      'package.json'
+  // Always prefer the package.json name
+  async getPackageName(): Promise<PackageName> {
+    if (this._packageName === undefined) {
+      const pkgJsonContents = await this.getPkgJsonContents();
+      const pkg = JSON.parse(pkgJsonContents.parsedContent);
+      this.packageName = this._packageName = pkg.name ?? this.packageName;
+    }
+    return {
+      name: this.packageName,
+      getComponent: () =>
+        this.packageName.match(/^@[\w-]+\//)
+          ? this.packageName.split('/')[1]
+          : this.packageName,
+    };
+  }
+
+  protected async _run(): Promise<number | undefined> {
+    const packageName = await this.getPackageName();
+    const latestTag: GitHubTag | undefined = await this.latestTag(
+      this.monorepoTags ? `${packageName.getComponent()}-` : undefined
     );
-    const pkg = JSON.parse(contents.parsedContent);
-    if (pkg.name) return pkg.name;
-    else return undefined;
+    const commits: Commit[] = await this.commits({
+      sha: latestTag ? latestTag.sha : undefined,
+      path: this.path,
+    });
+    const openPROptions = await this.getOpenPROptions(commits, latestTag);
+    return openPROptions ? await this.openPR(openPROptions) : undefined;
+  }
+
+  private async getPkgJsonContents(): Promise<GitHubFileContents> {
+    if (!this.pkgJsonContents) {
+      this.pkgJsonContents = await this.gh.getFileContents(
+        this.addPath('package.json')
+      );
+    }
+    return this.pkgJsonContents;
   }
 }

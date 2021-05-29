@@ -9,12 +9,15 @@ common_templates = gcp.CommonTemplates()
 templates = common_templates.node_library()
 s.copy(templates, excludes=[
   'README.md',
+  'CONTRIBUTING.md',
   '.eslintignore',
-  '.eslintrc.yml',
+  '.eslintrc.json',
+  '.mocharc.js',
   '.prettierignore',
   '.prettierrc',
   '.nycrc',
   '.kokoro/presubmit/node10/system-test.cfg',
   '.kokoro/continuous/node10/system-test.cfg',
-  '.kokoro/system-test.sh'
+  '.kokoro/system-test.sh',
+  '.mocharc.js'
 ])

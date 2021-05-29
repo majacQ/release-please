@@ -15,37 +15,41 @@
 import chalk = require('chalk');
 import * as semver from 'semver';
 import {ReleaseType} from 'semver';
-import {Readable} from 'stream';
 
 import {checkpoint, CheckpointType} from './util/checkpoint';
 import {Commit} from './graphql-to-commits';
+import {
+  ConventionalChangelogCommit,
+  parser,
+} from '@conventional-commits/parser';
+import toConventionalChangelogFormat from './util/to-conventional-changelog-format';
+interface CommitWithHash extends ConventionalChangelogCommit {
+  hash: string | null;
+}
 
-// eslint-disable-next-line @typescript-eslint/no-var-requires
-const concat = require('concat-stream');
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const conventionalCommitsFilter = require('conventional-commits-filter');
 // eslint-disable-next-line @typescript-eslint/no-var-requires
-const conventionalCommitsParser = require('conventional-commits-parser');
-// eslint-disable-next-line @typescript-eslint/no-var-requires
 const conventionalChangelogWriter = require('conventional-changelog-writer');
-// eslint-disable-next-line @typescript-eslint/no-var-requires
-const parseGithubRepoUrl = require('parse-github-repo-url');
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const presetFactory = require('conventional-changelog-conventionalcommits');
 
 interface ConventionalCommitsOptions {
   commits: Commit[];
-  githubRepoUrl: string;
+  owner: string;
+  repository: string;
   host?: string;
   bumpMinorPreMajor?: boolean;
+  bumpPatchForMinorPreMajor?: boolean;
   // allow for customized commit template.
   commitPartial?: string;
   headerPartial?: string;
   mainTemplate?: string;
   changelogSections?: ChangelogSection[];
+  commitFilter?: (c: ConventionalChangelogCommit) => boolean;
 }
 
-interface ChangelogSection {
+export interface ChangelogSection {
   type: string;
   section: string;
   hidden?: boolean;
@@ -68,36 +72,73 @@ interface Note {
   text: string;
 }
 
-interface ParsedConventionalCommit {
-  type: string;
-  scope: string | null;
-  subject: string;
-  merge: boolean | null;
-  header: string;
-  body: string | null;
-  footer: string | null;
-  notes: Note[];
-  references: object[];
-  mentions: string[];
-  revert: boolean | null;
+function getParsedCommits(
+  commits: Commit[],
+  commitFilter: (c: ConventionalChangelogCommit) => boolean = () => false
+): CommitWithHash[] {
+  const parsedCommits: CommitWithHash[] = [];
+  for (const commit of commits) {
+    try {
+      for (const parsedCommit of toConventionalChangelogFormat(
+        parser(commit.message)
+      )) {
+        const commitWithHash = postProcessCommits(
+          parsedCommit
+        ) as CommitWithHash;
+        if (commitFilter(parsedCommit)) {
+          continue;
+        }
+        commitWithHash.hash = commit.sha;
+        parsedCommits.push(commitWithHash);
+      }
+    } catch (_err) {
+      // Commit is not in conventional commit format, it does not
+      // contribute to the CHANGELOG generation.
+    }
+  }
+  return parsedCommits;
 }
 
-// Perform some post processing on the commits parsed by conventional commits:
-// 1. don't allow BREAKING CHANGES to have two newlines:
-import {Transform} from 'stream';
+// TODO(@bcoe): now that we walk the actual AST of conventional commits
+// we should be able to move post processing into
+// to-conventional-changelog.ts.
+function postProcessCommits(commit: ConventionalChangelogCommit) {
+  commit.notes.forEach(note => {
+    let text = '';
+    let i = 0;
+    let extendedContext = false;
+    for (const chunk of note.text.split(/\r?\n/)) {
+      if (i > 0 && hasExtendedContext(chunk) && !extendedContext) {
+        text = `${text.trim()}\n`;
+        extendedContext = true;
+      }
+      if (chunk === '') break;
+      else if (extendedContext) {
+        text += `    ${chunk}\n`;
+      } else {
+        text += `${chunk} `;
+      }
+      i++;
+    }
+    note.text = text.trim();
+  });
+  return commit;
+}
 
-class PostProcessCommits extends Transform {
-  _transform(
-    chunk: ParsedConventionalCommit,
-    _encoding: string,
-    done: Function
-  ) {
-    chunk.notes.forEach(note => {
-      note.text = note.text.split(/\r?\n/)[0];
-    });
-    this.push(JSON.stringify(chunk, null, 4) + '\n');
-    done();
-  }
+// If someone wishes to include additional contextual information for a
+// BREAKING CHANGE using markdown, they can do so by starting the line after the initial
+// breaking change description with either:
+//
+// 1. a fourth-level header.
+// 2. a bulleted list (using either '*' or '-').
+//
+// BREAKING CHANGE: there were breaking changes
+// #### Deleted Endpoints
+// - endpoint 1
+// - endpoint 2
+function hasExtendedContext(line: string) {
+  if (line.match(/^#### |^[*-] /)) return true;
+  return false;
 }
 
 export class ConventionalCommits {
@@ -106,28 +147,29 @@ export class ConventionalCommits {
   owner: string;
   repository: string;
   bumpMinorPreMajor?: boolean;
+  bumpPatchForMinorPreMajor?: boolean;
 
   // allow for customized commit template.
   commitPartial?: string;
   headerPartial?: string;
   mainTemplate?: string;
   changelogSections?: ChangelogSection[];
+  private commitFilter?: (c: ConventionalChangelogCommit) => boolean;
 
   constructor(options: ConventionalCommitsOptions) {
-    const parsedGithubRepoUrl = parseGithubRepoUrl(options.githubRepoUrl);
-    if (!parsedGithubRepoUrl) throw Error('could not parse githubRepoUrl');
-    const [owner, repository] = parsedGithubRepoUrl;
     this.commits = options.commits;
     this.bumpMinorPreMajor = options.bumpMinorPreMajor || false;
+    this.bumpPatchForMinorPreMajor = options.bumpPatchForMinorPreMajor || false;
     this.host = options.host || 'https://www.github.com';
-    this.owner = owner;
-    this.repository = repository;
+    this.owner = options.owner;
+    this.repository = options.repository;
     // we allow some languages (currently Ruby) to provide their own
     // template style:
     this.commitPartial = options.commitPartial;
     this.headerPartial = options.headerPartial;
     this.mainTemplate = options.mainTemplate;
     this.changelogSections = options.changelogSections;
+    this.commitFilter = options.commitFilter;
   }
   async suggestBump(version: string): Promise<BumpSuggestion> {
     const preMajor = this.bumpMinorPreMajor
@@ -169,78 +211,43 @@ export class ConventionalCommits {
       this.headerPartial || preset.writerOpts.headerPartial;
     preset.writerOpts.mainTemplate =
       this.mainTemplate || preset.writerOpts.mainTemplate;
-
-    return new Promise((resolve, reject) => {
-      let content = '';
-      const stream = this.commitsReadable()
-        .pipe(conventionalCommitsParser(preset.parserOpts))
-        .pipe(new PostProcessCommits({objectMode: true}))
-        .pipe(conventionalChangelogWriter(context, preset.writerOpts));
-
-      stream.on('error', (err: Error) => {
-        return reject(err);
-      });
-
-      stream.on('data', (buffer: Buffer) => {
-        content += buffer.toString('utf8');
-      });
-
-      stream.on('end', () => {
-        return resolve(content.trim());
-      });
-    });
+    const parsed: string = conventionalChangelogWriter
+      .parseArray(
+        getParsedCommits(this.commits, this.commitFilter),
+        context,
+        preset.writerOpts
+      )
+      .trim();
+    return parsed;
   }
   private async guessReleaseType(preMajor: boolean): Promise<BumpSuggestion> {
     const VERSIONS = ['major', 'minor', 'patch'];
     const preset = await presetFactory({preMajor});
-    return new Promise((resolve: Function, reject: Function) => {
-      const stream = this.commitsReadable()
-        .pipe(conventionalCommitsParser(preset.parserOpts))
-        .pipe(
-          concat((data: ParsedConventionalCommit[]) => {
-            const commits = conventionalCommitsFilter(data);
+    const commits = conventionalCommitsFilter(
+      getParsedCommits(this.commits, this.commitFilter)
+    ) as ConventionalChangelogCommit;
 
-            let result = preset.recommendedBumpOpts.whatBump(
-              commits,
-              preset.recommendedBumpOpts
-            );
+    let result = preset.recommendedBumpOpts.whatBump(
+      commits,
+      preset.recommendedBumpOpts
+    );
 
-            if (result && result.level !== null) {
-              result.releaseType = VERSIONS[result.level];
-            } else if (result === null) {
-              result = {};
-            }
+    if (result && result.level !== null) {
+      result.releaseType = VERSIONS[result.level];
+    } else if (result === null) {
+      result = {};
+    }
 
-            // we have slightly different logic than the default of conventional commits,
-            // the minor should be bumped when features are introduced for pre 1.x.x libs:
-            if (
-              result.reason.indexOf(' 0 features') === -1 &&
-              result.releaseType === 'patch'
-            ) {
-              result.releaseType = 'minor';
-            }
-
-            return resolve(result);
-          })
-        );
-
-      stream.on('error', (err: Error) => {
-        return reject(err);
-      });
-    });
-  }
-  private commitsReadable(): Readable {
-    // The conventional commits parser expects an array of string commit
-    // messages terminated by `-hash-` followed by the commit sha. We
-    // piggyback off of this, and use this sha when choosing a
-    // point to branch from for PRs.
-    const commitsReadable = new Readable();
-    this.commits.forEach((commit: Commit) => {
-      commitsReadable.push(
-        `${commit.message}\n-hash-\n${commit.sha ? commit.sha : ''}`
-      );
-    });
-    commitsReadable.push(null);
-    return commitsReadable;
+    // we have slightly different logic than the default of conventional commits,
+    // the minor should be bumped when features are introduced for pre 1.x.x libs:
+    // turn off custom logic here by setting bumpPatchForMinorPreMajor = true
+    if (
+      result.reason.indexOf(' 0 features') === -1 &&
+      result.releaseType === 'patch' &&
+      !this.bumpPatchForMinorPreMajor
+    ) {
+      result.releaseType = 'minor';
+    }
+    return result;
   }
 }

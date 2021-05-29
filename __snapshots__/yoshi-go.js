@@ -1,35 +1,141 @@
-exports['CHANGES-go-yoshi-message'] = `
-chore: created CHANGES.md
-`
+exports['YoshiGo run creates a release PR for google-api-go-client: changes'] = `
 
-exports['CHANGES-go-yoshi'] = `
+filename: CHANGES.md
 # Changelog
 
-## [0.124.0](https://www.github.com/googleapis/yoshi-go-test-repo/compare/v0.123.4...v0.124.0) 
+## [0.124.0](https://www.github.com/googleapis/google-api-go-client/compare/v0.123.4...v0.124.0) (1983-10-10)
 
 
 ### Features
 
-* **all:** auto-regenerate gapics , refs [#1000](https://www.github.com/googleapis/yoshi-go-test-repo/issues/1000) [#1001](https://www.github.com/googleapis/yoshi-go-test-repo/issues/1001)
-* **asset:** added a really cool feature ([d7d1c89](https://www.github.com/googleapis/yoshi-go-test-repo/commit/d7d1c890dc1526f4d62ceedad581f498195c8939))
-* **pubsublite:** start generating v1 ([1d9662c](https://www.github.com/googleapis/yoshi-go-test-repo/commit/1d9662cf08ab1cf3b68d95dee4dc99b7c4aac371))
+* **all:** auto-regenerate discovery clients , refs [#1000](https://www.github.com/googleapis/google-api-go-client/issues/1000) [#1001](https://www.github.com/googleapis/google-api-go-client/issues/1001)
+* **asset:** added a really cool feature ([df2e08e](https://www.github.com/googleapis/google-api-go-client/commit/df2e08e2237642c162d080064c1aa4da))
 
 
 ### Bug Fixes
 
-* **automl:** fixed a really bad bug ([d7d1c89](https://www.github.com/googleapis/yoshi-go-test-repo/commit/d7d1c890dc1526f4d62ceedad581f498195c8939))
+* **automl:** fixed a really bad bug ([2910926](https://www.github.com/googleapis/google-api-go-client/commit/29109261188e5c680a9508238b5c873b))
+* **pubsub/pstest:** this commit should also be included ([18928e9](https://www.github.com/googleapis/google-api-go-client/commit/18928e9edb0b75972e15d7154a2f4220))
+* **pubsub:** this commit should be included ([8685637](https://www.github.com/googleapis/google-api-go-client/commit/8685637f7d27f9cd12b41ed6a04702d1))
+* this commit should be included ([19da7da](https://www.github.com/googleapis/google-api-go-client/commit/19da7da9bf67e9017e99bf2ddfa385b2))
 
 `
 
-exports['PR body-go-yoshi'] = {
-  'title': 'chore: release 0.124.0',
-  'body': ':robot: I have created a release \\*beep\\* \\*boop\\* \n---\n## [0.124.0](https://www.github.com/googleapis/yoshi-go-test-repo/compare/v0.123.4...v0.124.0) \n\n\n### Features\n\n* **all:** auto-regenerate gapics , refs [#1000](https://www.github.com/googleapis/yoshi-go-test-repo/issues/1000) [#1001](https://www.github.com/googleapis/yoshi-go-test-repo/issues/1001)\n* **asset:** added a really cool feature ([d7d1c89](https://www.github.com/googleapis/yoshi-go-test-repo/commit/d7d1c890dc1526f4d62ceedad581f498195c8939))\n* **pubsublite:** start generating v1 ([1d9662c](https://www.github.com/googleapis/yoshi-go-test-repo/commit/1d9662cf08ab1cf3b68d95dee4dc99b7c4aac371))\n\n\n### Bug Fixes\n\n* **automl:** fixed a really bad bug ([d7d1c89](https://www.github.com/googleapis/yoshi-go-test-repo/commit/d7d1c890dc1526f4d62ceedad581f498195c8939))\n\nThis PR was generated with [Release Please](https://github.com/googleapis/release-please).',
-  'head': 'release-v0.124.0',
-  'base': 'master'
-}
+exports['YoshiGo run creates a release PR for google-api-go-client: options'] = `
 
-exports['labels-go-yoshi'] = {
-  'labels': [
-    'autorelease: pending'
-  ]
-}
+upstreamOwner: googleapis
+upstreamRepo: google-api-go-client
+title: chore: release 0.124.0
+branch: release-v0.124.0
+description: :robot: I have created a release \\*beep\\* \\*boop\\*
+---
+## [0.124.0](https://www.github.com/googleapis/google-api-go-client/compare/v0.123.4...v0.124.0) (1983-10-10)
+
+
+### Features
+
+* **all:** auto-regenerate discovery clients , refs [#1000](https://www.github.com/googleapis/google-api-go-client/issues/1000) [#1001](https://www.github.com/googleapis/google-api-go-client/issues/1001)
+* **asset:** added a really cool feature ([df2e08e](https://www.github.com/googleapis/google-api-go-client/commit/df2e08e2237642c162d080064c1aa4da))
+
+
+### Bug Fixes
+
+* **automl:** fixed a really bad bug ([2910926](https://www.github.com/googleapis/google-api-go-client/commit/29109261188e5c680a9508238b5c873b))
+* **pubsub/pstest:** this commit should also be included ([18928e9](https://www.github.com/googleapis/google-api-go-client/commit/18928e9edb0b75972e15d7154a2f4220))
+* **pubsub:** this commit should be included ([8685637](https://www.github.com/googleapis/google-api-go-client/commit/8685637f7d27f9cd12b41ed6a04702d1))
+* this commit should be included ([19da7da](https://www.github.com/googleapis/google-api-go-client/commit/19da7da9bf67e9017e99bf2ddfa385b2))
+
+This PR was generated with [Release Please](https://github.com/googleapis/release-please). See [documentation](https://github.com/googleapis/release-please#release-please).
+primary: master
+force: true
+fork: false
+message: chore: release 0.124.0
+`
+
+exports['YoshiGo run creates a release PR for google-cloud-go: changes'] = `
+
+filename: CHANGES.md
+# Changelog
+
+## [0.124.0](https://www.github.com/googleapis/google-cloud-go/compare/v0.123.4...v0.124.0) (1983-10-10)
+
+
+### Features
+
+* **asset:** added a really cool feature ([df2e08e](https://www.github.com/googleapis/google-cloud-go/commit/df2e08e2237642c162d080064c1aa4da))
+* **language:** added a new one ([b12e5a1](https://www.github.com/googleapis/google-cloud-go/commit/b12e5a1554a0a6ac8bb3b2213ad33090))
+
+
+### Bug Fixes
+
+* **automl:** fixed a minor thing ([b12e5a1](https://www.github.com/googleapis/google-cloud-go/commit/b12e5a1554a0a6ac8bb3b2213ad33090))
+* **automl:** fixed a really bad bug ([2910926](https://www.github.com/googleapis/google-cloud-go/commit/29109261188e5c680a9508238b5c873b))
+
+`
+
+exports['YoshiGo run creates a release PR for google-cloud-go: options'] = `
+
+upstreamOwner: googleapis
+upstreamRepo: google-cloud-go
+title: chore: release 0.124.0
+branch: release-v0.124.0
+description: :robot: I have created a release \\*beep\\* \\*boop\\*
+---
+## [0.124.0](https://www.github.com/googleapis/google-cloud-go/compare/v0.123.4...v0.124.0) (1983-10-10)
+
+
+### Features
+
+* **asset:** added a really cool feature ([df2e08e](https://www.github.com/googleapis/google-cloud-go/commit/df2e08e2237642c162d080064c1aa4da))
+* **language:** added a new one ([b12e5a1](https://www.github.com/googleapis/google-cloud-go/commit/b12e5a1554a0a6ac8bb3b2213ad33090))
+
+
+### Bug Fixes
+
+* **automl:** fixed a minor thing ([b12e5a1](https://www.github.com/googleapis/google-cloud-go/commit/b12e5a1554a0a6ac8bb3b2213ad33090))
+* **automl:** fixed a really bad bug ([2910926](https://www.github.com/googleapis/google-cloud-go/commit/29109261188e5c680a9508238b5c873b))
+
+This PR was generated with [Release Please](https://github.com/googleapis/release-please). See [documentation](https://github.com/googleapis/release-please#release-please).
+primary: master
+force: true
+fork: false
+message: chore: release 0.124.0
+`
+
+exports['YoshiGo supports releasing submodule from google-cloud-go: changes'] = `
+
+filename: pubsublite/CHANGES.md
+# Changelog
+
+### [0.123.5](https://www.github.com/googleapis/google-cloud-go/compare/pubsublite/v0.123.4...pubsublite/v0.123.5) (1983-10-10)
+
+
+### Bug Fixes
+
+* **pubsublite:** a minor issue ([0fa149c](https://www.github.com/googleapis/google-cloud-go/commit/0fa149c303104b62e410cd708ab23350))
+* **pubsublite:** start generating v1 ([93a4aa5](https://www.github.com/googleapis/google-cloud-go/commit/93a4aa5e59098a70d3fefd2c2ff99a03))
+
+`
+
+exports['YoshiGo supports releasing submodule from google-cloud-go: options'] = `
+
+upstreamOwner: googleapis
+upstreamRepo: google-cloud-go
+title: chore: release pubsublite 0.123.5
+branch: release-pubsublite-v0.123.5
+description: :robot: I have created a release \\*beep\\* \\*boop\\*
+---
+### [0.123.5](https://www.github.com/googleapis/google-cloud-go/compare/pubsublite/v0.123.4...pubsublite/v0.123.5) (1983-10-10)
+
+
+### Bug Fixes
+
+* **pubsublite:** a minor issue ([0fa149c](https://www.github.com/googleapis/google-cloud-go/commit/0fa149c303104b62e410cd708ab23350))
+* **pubsublite:** start generating v1 ([93a4aa5](https://www.github.com/googleapis/google-cloud-go/commit/93a4aa5e59098a70d3fefd2c2ff99a03))
+
+This PR was generated with [Release Please](https://github.com/googleapis/release-please). See [documentation](https://github.com/googleapis/release-please#release-please).
+primary: master
+force: true
+fork: false
+message: chore: release pubsublite 0.123.5
+`

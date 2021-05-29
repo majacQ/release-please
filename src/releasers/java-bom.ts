@@ -12,216 +12,71 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import {ReleasePR} from '../release-pr';
+import {ReleaseCandidate} from '../release-pr';
 
 import {ConventionalCommits} from '../conventional-commits';
 import {GitHubTag} from '../github';
-import {checkpoint, CheckpointType} from '../util/checkpoint';
-import {Update, VersionsMap} from '../updaters/update';
+import {VersionsMap} from '../updaters/update';
 import {Commit} from '../graphql-to-commits';
 
-// Generic
-import {Changelog} from '../updaters/changelog';
 // Java
-import {PomXML} from '../updaters/java/pom-xml';
-import {VersionsManifest} from '../updaters/java/versions-manifest';
-import {Readme} from '../updaters/java/readme';
 import {BumpType, maxBumpType, fromSemverReleaseType} from './java/bump_type';
 import {Version} from './java/version';
+import {JavaYoshi} from './java-yoshi';
 
-const CHANGELOG_SECTIONS = [
-  {type: 'feat', section: 'Features'},
-  {type: 'fix', section: 'Bug Fixes'},
-  {type: 'perf', section: 'Performance Improvements'},
-  {type: 'deps', section: 'Dependencies'},
-  {type: 'revert', section: 'Reverts'},
-  {type: 'docs', section: 'Documentation'},
-  {type: 'style', section: 'Styles', hidden: true},
-  {type: 'chore', section: 'Miscellaneous Chores', hidden: true},
-  {type: 'refactor', section: 'Code Refactoring', hidden: true},
-  {type: 'test', section: 'Tests', hidden: true},
-  {type: 'build', section: 'Build System', hidden: true},
-  {type: 'ci', section: 'Continuous Integration', hidden: true},
-];
 const DEPENDENCY_UPDATE_REGEX = /^deps: update dependency (.*) to (v.*)(\s\(#\d+\))?$/m;
 const DEPENDENCY_PATCH_VERSION_REGEX = /^v\d+\.\d+\.[1-9]\d*(-.*)?/;
 
-export class JavaBom extends ReleasePR {
-  static releaserName = 'java-bom';
-  protected async _run() {
-    const versionsManifestContent = await this.gh.getFileContents(
-      'versions.txt'
-    );
-    console.info('version.txt content', versionsManifestContent.parsedContent);
-    const currentVersions = VersionsManifest.parseVersions(
-      versionsManifestContent.parsedContent
-    );
+export class JavaBom extends JavaYoshi {
+  private bumpType?: BumpType;
 
-    const snapshotNeeded = VersionsManifest.needsSnapshot(
-      versionsManifestContent.parsedContent
-    );
-    if (!this.snapshot) {
-      // if a snapshot is not explicitly requested, decided what type
-      // of release based on whether a snapshot is needed or not
-      this.snapshot = snapshotNeeded;
-    } else if (!snapshotNeeded) {
-      checkpoint(
-        'release asked for a snapshot, but no snapshot is needed',
-        CheckpointType.Failure
-      );
-      return;
-    }
-
-    if (this.snapshot) {
-      this.labels = ['type: process'];
-    }
-
-    const latestTag: GitHubTag | undefined = await this.gh.latestTag();
-
-    const commits = await this.commits({
-      sha: latestTag ? latestTag.sha : undefined,
-      perPage: this.snapshot ? 1 : 100,
-      labels: true,
-    });
-    if (commits.length === 0) {
-      checkpoint(
-        `no commits found since ${
-          latestTag ? latestTag.sha : 'beginning of time'
-        }`,
-        CheckpointType.Failure
-      );
-      return;
-    }
-    const prSHA = commits[0].sha;
-    const cc = new ConventionalCommits({
-      commits,
-      githubRepoUrl: this.repoUrl,
-      bumpMinorPreMajor: this.bumpMinorPreMajor,
-      changelogSections: CHANGELOG_SECTIONS,
-    });
-
-    const bumpType = this.snapshot
-      ? 'snapshot'
-      : maxBumpType([
-          JavaBom.determineBumpType(commits),
-          fromSemverReleaseType(
-            (
-              await cc.suggestBump(
-                latestTag?.version || this.defaultInitialVersion()
-              )
-            ).releaseType
-          ),
-        ]);
-
-    const candidate = {
-      version: latestTag
-        ? Version.parse(latestTag.version).bump(bumpType).toString()
-        : this.defaultInitialVersion(),
-      previousTag: latestTag?.version,
-    };
-    const changelogEntry = this.snapshot
-      ? '### Updating meta-information for bleeding-edge SNAPSHOT release.'
-      : await cc.generateChangelogEntry({
-          version: candidate.version,
-          currentTag: `v${candidate.version}`,
-          previousTag: candidate.previousTag,
-        });
-
-    // don't create a release candidate until user facing changes
-    // (fix, feat, BREAKING CHANGE) have been made; a CHANGELOG that's
-    // one line is a good indicator that there were no interesting commits.
-    if (this.changelogEmpty(changelogEntry) && !this.snapshot) {
-      checkpoint(
-        `no user facing commits found since ${
-          latestTag ? latestTag.sha : 'beginning of time'
-        }`,
-        CheckpointType.Failure
-      );
-      return;
-    }
-
-    const candidateVersions = JavaBom.bumpAllVersions(
-      bumpType,
-      currentVersions
-    );
-
-    const updates: Update[] = [];
-
-    if (!this.snapshot) {
-      updates.push(
-        new Changelog({
-          path: 'CHANGELOG.md',
-          changelogEntry,
-          versions: candidateVersions,
-          version: candidate.version,
-          packageName: this.packageName,
-        })
-      );
-
-      updates.push(
-        new Readme({
-          path: 'README.md',
-          changelogEntry,
-          versions: candidateVersions,
-          version: candidate.version,
-          packageName: this.packageName,
-        })
-      );
-    }
-
-    updates.push(
-      new VersionsManifest({
-        path: 'versions.txt',
-        changelogEntry,
-        versions: candidateVersions,
-        version: candidate.version,
-        packageName: this.packageName,
-        contents: versionsManifestContent,
-      })
-    );
-
-    const pomFiles = await this.gh.findFilesByFilename('pom.xml');
-    pomFiles.forEach(path => {
-      updates.push(
-        new PomXML({
-          path,
-          changelogEntry,
-          versions: candidateVersions,
-          version: candidate.version,
-          packageName: this.packageName,
-        })
-      );
-    });
-
-    console.info(
-      `attempting to open PR latestTagSha = ${latestTag!.sha} prSha = ${prSHA}`
-    );
-    await this.openPR({
-      sha: prSHA!,
-      changelogEntry: `${changelogEntry}\n---\n`,
-      updates,
-      version: candidate.version,
-      includePackageName: this.monorepoTags,
-    });
-  }
-
-  protected supportsSnapshots(): boolean {
-    return true;
-  }
-
-  protected defaultInitialVersion(): string {
-    return '0.1.0';
-  }
-
-  static bumpAllVersions(
-    bumpType: BumpType,
+  protected async coerceVersions(
+    cc: ConventionalCommits,
+    _candidate: ReleaseCandidate,
+    latestTag: GitHubTag | undefined,
     currentVersions: VersionsMap
-  ): VersionsMap {
+  ): Promise<VersionsMap> {
+    const bumpType = await this.getBumpType(cc, latestTag);
     const newVersions: VersionsMap = new Map<string, string>();
     for (const [k, version] of currentVersions) {
       newVersions.set(k, Version.parse(version).bump(bumpType).toString());
     }
     return newVersions;
+  }
+
+  private async getBumpType(
+    cc: ConventionalCommits,
+    latestTag: GitHubTag | undefined
+  ): Promise<BumpType> {
+    if (!this.bumpType) {
+      this.bumpType = this.snapshot
+        ? 'snapshot'
+        : maxBumpType([
+            JavaBom.determineBumpType(cc.commits),
+            fromSemverReleaseType(
+              (
+                await cc.suggestBump(
+                  latestTag?.version || this.defaultInitialVersion()
+                )
+              ).releaseType
+            ),
+          ]);
+    }
+    return this.bumpType;
+  }
+
+  protected async coerceReleaseCandidate(
+    cc: ConventionalCommits,
+    latestTag: GitHubTag | undefined,
+    _preRelease = false
+  ): Promise<ReleaseCandidate> {
+    const bumpType = await this.getBumpType(cc, latestTag);
+    return {
+      version: latestTag
+        ? Version.parse(latestTag.version).bump(bumpType).toString()
+        : this.defaultInitialVersion(),
+      previousTag: latestTag?.version,
+    };
   }
 
   static dependencyUpdates(commits: Commit[]): VersionsMap {

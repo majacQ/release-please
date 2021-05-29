@@ -24,7 +24,6 @@ export class PackageJson implements Update {
   packageName: string;
   create: boolean;
   contents?: GitHubFileContents;
-  skipCi?: boolean;
 
   constructor(options: UpdateOptions) {
     this.create = false;
@@ -32,7 +31,7 @@ export class PackageJson implements Update {
     this.changelogEntry = options.changelogEntry;
     this.version = options.version;
     this.packageName = options.packageName;
-    this.skipCi = options.skipCi;
+    this.contents = options.contents;
   }
 
   updateContent(content: string): string {

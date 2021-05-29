@@ -1,4 +1,42 @@
-exports['papckage-lock-json-node-with'] = `
+exports['Node getOpenPROptions returns release PR changes with defaultInitialVersion 0.1.0, when bumpMinorPreMajor is true 1'] = `
+## 0.1.0 (1983-10-10)
+
+
+### Bug Fixes
+
+* **deps:** update dependency com.google.cloud:google-cloud-spanner to v1.50.0 ([08ca011](https://www.github.com/googleapis/node-test-repo/commit/08ca01180a91c0a1ba8992b491db9212))
+* **deps:** update dependency com.google.cloud:google-cloud-storage to v1.120.0 ([845db13](https://www.github.com/googleapis/node-test-repo/commit/845db1381b3d5d20151cad2588f85feb))
+---
+
+`
+
+exports['Node getOpenPROptions returns release PR changes with defaultInitialVersion 1.0.0, when bumpMinorPreMajor is false 1'] = `
+## 1.0.0 (1983-10-10)
+
+
+### Bug Fixes
+
+* **deps:** update dependency com.google.cloud:google-cloud-spanner to v1.50.0 ([08ca011](https://www.github.com/googleapis/node-test-repo/commit/08ca01180a91c0a1ba8992b491db9212))
+* **deps:** update dependency com.google.cloud:google-cloud-storage to v1.120.0 ([845db13](https://www.github.com/googleapis/node-test-repo/commit/845db1381b3d5d20151cad2588f85feb))
+---
+
+`
+
+exports['Node getOpenPROptions returns release PR changes with semver patch bump 1'] = `
+### [0.123.5](https://www.github.com/googleapis/node-test-repo/compare/v0.123.4...v0.123.5) (1983-10-10)
+
+
+### Bug Fixes
+
+* **deps:** update dependency com.google.cloud:google-cloud-spanner to v1.50.0 ([08ca011](https://www.github.com/googleapis/node-test-repo/commit/08ca01180a91c0a1ba8992b491db9212))
+* **deps:** update dependency com.google.cloud:google-cloud-storage to v1.120.0 ([845db13](https://www.github.com/googleapis/node-test-repo/commit/845db1381b3d5d20151cad2588f85feb))
+---
+
+`
+
+exports['Node run creates a release PR with package-lock.json: changes'] = `
+
+filename: package-lock.json
 {
   "name": "node-test-repo",
   "version": "0.123.5",
@@ -7,30 +45,18 @@ exports['papckage-lock-json-node-with'] = `
   "dependencies": {}
 }
 
-`
-
-exports['CHANGELOG-node-message-with-package-lock'] = `
-chore: created CHANGELOG.md [ci skip]
-`
-
-exports['CHANGELOG-node-with-package-lock'] = `
+filename: CHANGELOG.md
 # Changelog
 
-### [0.123.5](https://www.github.com/googleapis/node-test-repo/compare/v0.123.4...v0.123.5) 
+### [0.123.5](https://www.github.com/googleapis/node-test-repo/compare/v0.123.4...v0.123.5) (1983-10-10)
 
 
 ### Bug Fixes
 
-* **deps:** update dependency com.google.cloud:google-cloud-spanner to v1.50.0 ([1f9663c](https://www.github.com/googleapis/node-test-repo/commit/1f9663cf08ab1cf3b68d95dee4dc99b7c4aac373))
-* **deps:** update dependency com.google.cloud:google-cloud-storage to v1.120.0 ([fcd1c89](https://www.github.com/googleapis/node-test-repo/commit/fcd1c890dc1526f4d62ceedad561f498195c8939))
+* **deps:** update dependency com.google.cloud:google-cloud-spanner to v1.50.0 ([08ca011](https://www.github.com/googleapis/node-test-repo/commit/08ca01180a91c0a1ba8992b491db9212))
+* **deps:** update dependency com.google.cloud:google-cloud-storage to v1.120.0 ([845db13](https://www.github.com/googleapis/node-test-repo/commit/845db1381b3d5d20151cad2588f85feb))
 
-`
-
-exports['package-json-node-message-with-package-lock'] = `
-chore: updated package.json
-`
-
-exports['package-json-node-with-package-lock'] = `
+filename: package.json
 {
   "name": "node-test-repo",
   "version": "0.123.5",
@@ -41,54 +67,45 @@ exports['package-json-node-with-package-lock'] = `
 
 `
 
-exports['package-lock-json-node-message'] = `
-chore: updated package-lock.json [ci skip]
-`
+exports['Node run creates a release PR with package-lock.json: options'] = `
 
-exports['PR body-node-with-package-lock'] = `
-:robot: I have created a release \\*beep\\* \\*boop\\* 
+upstreamOwner: googleapis
+upstreamRepo: node-test-repo
+title: chore: release 0.123.5
+branch: release-v0.123.5
+description: :robot: I have created a release \\*beep\\* \\*boop\\*
 ---
-### [0.123.5](https://www.github.com/googleapis/node-test-repo/compare/v0.123.4...v0.123.5) 
+### [0.123.5](https://www.github.com/googleapis/node-test-repo/compare/v0.123.4...v0.123.5) (1983-10-10)
 
 
 ### Bug Fixes
 
-* **deps:** update dependency com.google.cloud:google-cloud-spanner to v1.50.0 ([1f9663c](https://www.github.com/googleapis/node-test-repo/commit/1f9663cf08ab1cf3b68d95dee4dc99b7c4aac373))
-* **deps:** update dependency com.google.cloud:google-cloud-storage to v1.120.0 ([fcd1c89](https://www.github.com/googleapis/node-test-repo/commit/fcd1c890dc1526f4d62ceedad561f498195c8939))
+* **deps:** update dependency com.google.cloud:google-cloud-spanner to v1.50.0 ([08ca011](https://www.github.com/googleapis/node-test-repo/commit/08ca01180a91c0a1ba8992b491db9212))
+* **deps:** update dependency com.google.cloud:google-cloud-storage to v1.120.0 ([845db13](https://www.github.com/googleapis/node-test-repo/commit/845db1381b3d5d20151cad2588f85feb))
 ---
 
 
-This PR was generated with [Release Please](https://github.com/googleapis/release-please).
+This PR was generated with [Release Please](https://github.com/googleapis/release-please). See [documentation](https://github.com/googleapis/release-please#release-please).
+primary: master
+force: true
+fork: false
+message: chore: release 0.123.5
 `
 
-exports['labels-node-with-package-lock'] = {
-  'labels': [
-    'autorelease: pending'
-  ]
-}
+exports['Node run creates a release PR without package-lock.json: changes'] = `
 
-exports['CHANGELOG-node-message-'] = `
-chore: created CHANGELOG.md [ci skip]
-`
-
-exports['CHANGELOG-node-'] = `
+filename: CHANGELOG.md
 # Changelog
 
-### [0.123.5](https://www.github.com/googleapis/node-test-repo/compare/v0.123.4...v0.123.5) 
+### [0.123.5](https://www.github.com/googleapis/node-test-repo/compare/v0.123.4...v0.123.5) (1983-10-10)
 
 
 ### Bug Fixes
 
-* **deps:** update dependency com.google.cloud:google-cloud-spanner to v1.50.0 ([1f9663c](https://www.github.com/googleapis/node-test-repo/commit/1f9663cf08ab1cf3b68d95dee4dc99b7c4aac373))
-* **deps:** update dependency com.google.cloud:google-cloud-storage to v1.120.0 ([fcd1c89](https://www.github.com/googleapis/node-test-repo/commit/fcd1c890dc1526f4d62ceedad561f498195c8939))
+* **deps:** update dependency com.google.cloud:google-cloud-spanner to v1.50.0 ([08ca011](https://www.github.com/googleapis/node-test-repo/commit/08ca01180a91c0a1ba8992b491db9212))
+* **deps:** update dependency com.google.cloud:google-cloud-storage to v1.120.0 ([845db13](https://www.github.com/googleapis/node-test-repo/commit/845db1381b3d5d20151cad2588f85feb))
 
-`
-
-exports['package-json-node-message-'] = `
-chore: updated package.json
-`
-
-exports['package-json-node-'] = `
+filename: package.json
 {
   "name": "node-test-repo",
   "version": "0.123.5",
@@ -99,50 +116,45 @@ exports['package-json-node-'] = `
 
 `
 
-exports['PR body-node-'] = `
-:robot: I have created a release \\*beep\\* \\*boop\\* 
+exports['Node run creates a release PR without package-lock.json: options'] = `
+
+upstreamOwner: googleapis
+upstreamRepo: node-test-repo
+title: chore: release 0.123.5
+branch: release-v0.123.5
+description: :robot: I have created a release \\*beep\\* \\*boop\\*
 ---
-### [0.123.5](https://www.github.com/googleapis/node-test-repo/compare/v0.123.4...v0.123.5) 
+### [0.123.5](https://www.github.com/googleapis/node-test-repo/compare/v0.123.4...v0.123.5) (1983-10-10)
 
 
 ### Bug Fixes
 
-* **deps:** update dependency com.google.cloud:google-cloud-spanner to v1.50.0 ([1f9663c](https://www.github.com/googleapis/node-test-repo/commit/1f9663cf08ab1cf3b68d95dee4dc99b7c4aac373))
-* **deps:** update dependency com.google.cloud:google-cloud-storage to v1.120.0 ([fcd1c89](https://www.github.com/googleapis/node-test-repo/commit/fcd1c890dc1526f4d62ceedad561f498195c8939))
+* **deps:** update dependency com.google.cloud:google-cloud-spanner to v1.50.0 ([08ca011](https://www.github.com/googleapis/node-test-repo/commit/08ca01180a91c0a1ba8992b491db9212))
+* **deps:** update dependency com.google.cloud:google-cloud-storage to v1.120.0 ([845db13](https://www.github.com/googleapis/node-test-repo/commit/845db1381b3d5d20151cad2588f85feb))
 ---
 
 
-This PR was generated with [Release Please](https://github.com/googleapis/release-please).
+This PR was generated with [Release Please](https://github.com/googleapis/release-please). See [documentation](https://github.com/googleapis/release-please#release-please).
+primary: master
+force: true
+fork: false
+message: chore: release 0.123.5
 `
 
-exports['labels-node-'] = {
-  'labels': [
-    'autorelease: pending'
-  ]
-}
+exports['Node run creates release PR relative to a path: changes'] = `
 
-exports['CHANGELOG-node-message-with-path'] = `
-chore: created packages/foo/CHANGELOG.md [ci skip]
-`
-
-exports['CHANGELOG-node-with-path'] = `
+filename: packages/foo/CHANGELOG.md
 # Changelog
 
-### [0.123.5](https://www.github.com/googleapis/node-test-repo/compare/v0.123.4...v0.123.5) 
+### [0.123.5](https://www.github.com/googleapis/node-test-repo/compare/v0.123.4...v0.123.5) (1983-10-10)
 
 
 ### Bug Fixes
 
-* **deps:** update dependency com.google.cloud:google-cloud-spanner to v1.50.0 ([1f9663c](https://www.github.com/googleapis/node-test-repo/commit/1f9663cf08ab1cf3b68d95dee4dc99b7c4aac373))
-* **deps:** update dependency com.google.cloud:google-cloud-storage to v1.120.0 ([fcd1c89](https://www.github.com/googleapis/node-test-repo/commit/fcd1c890dc1526f4d62ceedad561f498195c8939))
+* **deps:** update dependency com.google.cloud:google-cloud-spanner to v1.50.0 ([08ca011](https://www.github.com/googleapis/node-test-repo/commit/08ca01180a91c0a1ba8992b491db9212))
+* **deps:** update dependency com.google.cloud:google-cloud-storage to v1.120.0 ([845db13](https://www.github.com/googleapis/node-test-repo/commit/845db1381b3d5d20151cad2588f85feb))
 
-`
-
-exports['package-json-node-message-with-path'] = `
-chore: updated packages/foo/package.json
-`
-
-exports['package-json-node-with-path'] = `
+filename: packages/foo/package.json
 {
   "name": "node-test-repo",
   "version": "0.123.5",
@@ -153,24 +165,76 @@ exports['package-json-node-with-path'] = `
 
 `
 
-exports['PR body-node-with-path'] = `
-:robot: I have created a release \\*beep\\* \\*boop\\* 
+exports['Node run creates release PR relative to a path: options'] = `
+
+upstreamOwner: googleapis
+upstreamRepo: node-test-repo
+title: chore: release 0.123.5
+branch: release-v0.123.5
+description: :robot: I have created a release \\*beep\\* \\*boop\\*
 ---
-### [0.123.5](https://www.github.com/googleapis/node-test-repo/compare/v0.123.4...v0.123.5) 
+### [0.123.5](https://www.github.com/googleapis/node-test-repo/compare/v0.123.4...v0.123.5) (1983-10-10)
 
 
 ### Bug Fixes
 
-* **deps:** update dependency com.google.cloud:google-cloud-spanner to v1.50.0 ([1f9663c](https://www.github.com/googleapis/node-test-repo/commit/1f9663cf08ab1cf3b68d95dee4dc99b7c4aac373))
-* **deps:** update dependency com.google.cloud:google-cloud-storage to v1.120.0 ([fcd1c89](https://www.github.com/googleapis/node-test-repo/commit/fcd1c890dc1526f4d62ceedad561f498195c8939))
+* **deps:** update dependency com.google.cloud:google-cloud-spanner to v1.50.0 ([08ca011](https://www.github.com/googleapis/node-test-repo/commit/08ca01180a91c0a1ba8992b491db9212))
+* **deps:** update dependency com.google.cloud:google-cloud-storage to v1.120.0 ([845db13](https://www.github.com/googleapis/node-test-repo/commit/845db1381b3d5d20151cad2588f85feb))
 ---
 
 
-This PR was generated with [Release Please](https://github.com/googleapis/release-please).
+This PR was generated with [Release Please](https://github.com/googleapis/release-please). See [documentation](https://github.com/googleapis/release-please#release-please).
+primary: master
+force: true
+fork: false
+message: chore: release 0.123.5
 `
 
-exports['labels-node-with-path'] = {
-  'labels': [
-    'autorelease: pending'
-  ]
+exports['Node run uses detected package name in branch: changes'] = `
+
+filename: CHANGELOG.md
+# Changelog
+
+### [0.123.5](https://www.github.com/googleapis/node-test-repo/compare/node-test-repo-v0.123.4...node-test-repo-v0.123.5) (1983-10-10)
+
+
+### Bug Fixes
+
+* **deps:** update dependency com.google.cloud:google-cloud-spanner to v1.50.0 ([08ca011](https://www.github.com/googleapis/node-test-repo/commit/08ca01180a91c0a1ba8992b491db9212))
+* **deps:** update dependency com.google.cloud:google-cloud-storage to v1.120.0 ([845db13](https://www.github.com/googleapis/node-test-repo/commit/845db1381b3d5d20151cad2588f85feb))
+
+filename: package.json
+{
+  "name": "node-test-repo",
+  "version": "0.123.5",
+  "repository": {
+    "url": "git@github.com:samples/node-test-repo.git"
+  }
 }
+
+`
+
+exports['Node run uses detected package name in branch: options'] = `
+
+upstreamOwner: googleapis
+upstreamRepo: node-test-repo
+title: chore: release node-test-repo 0.123.5
+branch: release-node-test-repo-v0.123.5
+description: :robot: I have created a release \\*beep\\* \\*boop\\*
+---
+### [0.123.5](https://www.github.com/googleapis/node-test-repo/compare/node-test-repo-v0.123.4...node-test-repo-v0.123.5) (1983-10-10)
+
+
+### Bug Fixes
+
+* **deps:** update dependency com.google.cloud:google-cloud-spanner to v1.50.0 ([08ca011](https://www.github.com/googleapis/node-test-repo/commit/08ca01180a91c0a1ba8992b491db9212))
+* **deps:** update dependency com.google.cloud:google-cloud-storage to v1.120.0 ([845db13](https://www.github.com/googleapis/node-test-repo/commit/845db1381b3d5d20151cad2588f85feb))
+---
+
+
+This PR was generated with [Release Please](https://github.com/googleapis/release-please). See [documentation](https://github.com/googleapis/release-please#release-please).
+primary: master
+force: true
+fork: false
+message: chore: release node-test-repo 0.123.5
+`

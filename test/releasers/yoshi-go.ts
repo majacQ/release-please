@@ -12,109 +12,216 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import {describe, it, before} from 'mocha';
+import * as assert from 'assert';
+import {describe, it, before, afterEach} from 'mocha';
 import * as nock from 'nock';
 import {GoYoshi} from '../../src/releasers/go-yoshi';
-import {readFileSync} from 'fs';
-import {resolve} from 'path';
-import * as snapshot from 'snap-shot-it';
+import {stubSuggesterWithSnapshot} from '../helpers';
+import * as sinon from 'sinon';
+import {expect} from 'chai';
+import {buildMockCommit} from '../helpers';
+import {GitHub} from '../../src/github';
 
-const fixturesPath = './test/releasers/fixtures/yoshi-go';
-
-interface MochaThis {
-  [skip: string]: Function;
-}
+const sandbox = sinon.createSandbox();
 
 describe('YoshiGo', () => {
+  afterEach(() => {
+    sandbox.restore();
+  });
   describe('run', () => {
     before(() => {
       nock.disableNetConnect();
     });
-    it('creates a release PR', async () => {
-      const graphql = JSON.parse(
-        readFileSync(resolve(fixturesPath, 'commits.json'), 'utf8')
-      );
-      const req = nock('https://api.github.com')
-        .get(
-          '/repos/googleapis/yoshi-go-test-repo/pulls?state=closed&per_page=100'
-        )
-        .reply(200, undefined)
-        // fetch semver tags, this will be used to determine
-        // the delta since the last release.
-        .get('/repos/googleapis/yoshi-go-test-repo/tags?per_page=100')
-        .reply(200, [
-          {
-            name: 'v0.123.4',
-            commit: {
-              sha: 'da6e52d956c1e35d19e75e0f2fdba439739ba364',
-            },
-          },
-        ])
-        .post('/graphql')
-        .reply(200, {
-          data: graphql,
-        })
-        // getting the latest tag
-        .get('/repos/googleapis/yoshi-go-test-repo/git/refs?per_page=100')
-        .reply(200, [{ref: 'refs/tags/v0.123.4'}])
-        // creating a new branch
-        .post('/repos/googleapis/yoshi-go-test-repo/git/refs')
-        .reply(200)
-        // check for CHANGES.md
-        .get(
-          '/repos/googleapis/yoshi-go-test-repo/contents/CHANGES.md?ref=refs%2Fheads%2Frelease-v0.124.0'
-        )
-        .reply(404)
-        .put(
-          '/repos/googleapis/yoshi-go-test-repo/contents/CHANGES.md',
-          (req: {[key: string]: string}) => {
-            snapshot('CHANGES-go-yoshi-message', req.message);
-            snapshot(
-              'CHANGES-go-yoshi',
-              Buffer.from(req.content, 'base64')
-                .toString('utf8')
-                .replace(/\([0-9]{4}-[0-9]{2}-[0-9]{2}\)/g, '')
-            );
-            return true;
-          }
-        )
-        .reply(201)
-        // check for default branch
-        .get('/repos/googleapis/yoshi-go-test-repo')
-        // eslint-disable-next-line @typescript-eslint/no-var-requires
-        .reply(200, require('../../../test/fixtures/repo-get-1.json'))
-        // create release
-        .post(
-          '/repos/googleapis/yoshi-go-test-repo/pulls',
-          (req: {[key: string]: string}) => {
-            req.body = req.body.replace(/\([0-9]{4}-[0-9]{2}-[0-9]{2}\)/g, '');
-            snapshot('PR body-go-yoshi', req);
-            return true;
-          }
-        )
-        .reply(200, {number: 1})
-        .post(
-          '/repos/googleapis/yoshi-go-test-repo/issues/1/labels',
-          (req: {[key: string]: string}) => {
-            snapshot('labels-go-yoshi', req);
-            return true;
-          }
-        )
-        .reply(200, {})
-        // this step tries to close any existing PRs; just return an empty list.
-        .get(
-          '/repos/googleapis/yoshi-go-test-repo/pulls?state=open&per_page=100'
-        )
-        .reply(200, []);
+    it('creates a release PR for google-cloud-go', async function () {
       const releasePR = new GoYoshi({
-        repoUrl: 'googleapis/yoshi-go-test-repo',
-        releaseType: 'yoshi-go',
-        // not actually used by this type of repo.
+        github: new GitHub({owner: 'googleapis', repo: 'google-cloud-go'}),
         packageName: 'yoshi-go',
-        apiUrl: 'https://api.github.com',
       });
+
+      sandbox.stub(releasePR.gh, 'getDefaultBranch').resolves('master');
+
+      // No open release PRs, so create a new release PR
+      sandbox
+        .stub(releasePR.gh, 'findOpenReleasePRs')
+        .returns(Promise.resolve([]));
+
+      // Indicates that there are no PRs currently waiting to be released:
+      sandbox
+        .stub(releasePR.gh, 'findMergedReleasePR')
+        .returns(Promise.resolve(undefined));
+
+      sandbox.stub(releasePR, 'latestTag').returns(
+        Promise.resolve({
+          name: 'v0.123.4',
+          sha: 'da6e52d956c1e35d19e75e0f2fdba439739ba364',
+          version: '0.123.4',
+        })
+      );
+
+      const getFileContentsStub = sandbox.stub(
+        releasePR.gh,
+        'getFileContentsOnBranch'
+      );
+      getFileContentsStub.rejects(
+        Object.assign(Error('not found'), {status: 404})
+      );
+
+      sandbox
+        .stub(releasePR.gh, 'commitsSinceSha')
+        .resolves([
+          buildMockCommit('fix(automl): fixed a really bad bug'),
+          buildMockCommit('feat(asset): added a really cool feature'),
+          buildMockCommit('fix(pubsub): this commit should be ignored'),
+          buildMockCommit('fix(pubsub/pstest): this commit should be ignored'),
+          buildMockCommit('fix: this commit should be ignored'),
+          buildMockCommit(
+            'chore(all): auto-regenerate gapics (#1000)\n\nChanges:\n\nchore(automl): cleaned up a thing\n  PiperOrigin-RevId: 352834281\nfix(pubsublite): a minor issue\n  PiperOrigin-RevId: 352834283'
+          ),
+          buildMockCommit(
+            'chore(all): auto-regenerate gapics (#1001)\n\nCommit Body\n\nChanges:\n\nfix(automl): fixed a minor thing\n  PiperOrigin-RevId: 352834280\nfeat(language): added a new one\n  PiperOrigin-RevId: 352834282'
+          ),
+          buildMockCommit('fix(pubsublite): start generating v1'),
+        ]);
+
+      const addLabelStub = sandbox
+        .stub(releasePR.gh, 'addLabels')
+        .withArgs(['autorelease: pending'], 22)
+        .resolves();
+
+      stubSuggesterWithSnapshot(sandbox, this.test!.fullTitle());
       await releasePR.run();
-      req.done();
+      expect(addLabelStub.callCount).to.eql(1);
     });
+    it('creates a release PR for google-api-go-client', async function () {
+      const releasePR = new GoYoshi({
+        github: new GitHub({owner: 'googleapis', repo: 'google-api-go-client'}),
+        packageName: 'yoshi-go',
+      });
+
+      sandbox.stub(releasePR.gh, 'getDefaultBranch').resolves('master');
+
+      // Indicates that there are no PRs currently waiting to be released:
+      sandbox
+        .stub(releasePR.gh, 'findMergedReleasePR')
+        .returns(Promise.resolve(undefined));
+
+      // Return latest tag used to determine next version #:
+      sandbox.stub(releasePR, 'latestTag').returns(
+        Promise.resolve({
+          sha: 'da6e52d956c1e35d19e75e0f2fdba439739ba364',
+          name: 'v0.123.4',
+          version: '0.123.4',
+        })
+      );
+
+      // See if there are any release PRs already open, we do this as
+      // we consider opening a new release-pr:
+      sandbox
+        .stub(releasePR.gh, 'findOpenReleasePRs')
+        .returns(Promise.resolve([]));
+
+      const getFileContentsStub = sandbox.stub(
+        releasePR.gh,
+        'getFileContentsOnBranch'
+      );
+      getFileContentsStub.rejects(
+        Object.assign(Error('not found'), {status: 404})
+      );
+
+      sandbox
+        .stub(releasePR.gh, 'commitsSinceSha')
+        .resolves([
+          buildMockCommit('fix(automl): fixed a really bad bug'),
+          buildMockCommit('feat(asset): added a really cool feature'),
+          buildMockCommit('fix(pubsub): this commit should be included'),
+          buildMockCommit(
+            'fix(pubsub/pstest): this commit should also be included'
+          ),
+          buildMockCommit('fix: this commit should be included'),
+          buildMockCommit(
+            'feat(all): auto-regenerate discovery clients (#1000)'
+          ),
+          buildMockCommit(
+            'feat(all): auto-regenerate discovery clients (#1001)\n\nCommit Body'
+          ),
+        ]);
+
+      // Call to add autorelease: pending label:
+      const addLabelStub = sandbox
+        .stub(releasePR.gh, 'addLabels')
+        .withArgs(['autorelease: pending'], 22)
+        .resolves();
+
+      stubSuggesterWithSnapshot(sandbox, this.test!.fullTitle());
+      const pr = await releasePR.run();
+      assert.strictEqual(pr, 22);
+      expect(addLabelStub.callCount).to.eql(1);
+    });
+  });
+  it('supports releasing submodule from google-cloud-go', async function () {
+    const releasePR = new GoYoshi({
+      github: new GitHub({owner: 'googleapis', repo: 'google-cloud-go'}),
+      packageName: 'pubsublite',
+      monorepoTags: true,
+      path: 'pubsublite',
+    });
+
+    sandbox.stub(releasePR.gh, 'getDefaultBranch').resolves('master');
+
+    // Indicates that there are no PRs currently waiting to be released:
+    sandbox
+      .stub(releasePR.gh, 'findMergedReleasePR')
+      .returns(Promise.resolve(undefined));
+
+    // Return latest tag used to determine next version #:
+    sandbox.stub(releasePR, 'latestTag').returns(
+      Promise.resolve({
+        sha: 'da6e52d956c1e35d19e75e0f2fdba439739ba364',
+        name: 'pubsublite/v0.123.4',
+        version: '0.123.4',
+      })
+    );
+
+    const getFileContentsStub = sandbox.stub(
+      releasePR.gh,
+      'getFileContentsOnBranch'
+    );
+    getFileContentsStub.rejects(
+      Object.assign(Error('not found'), {status: 404})
+    );
+
+    sandbox
+      .stub(releasePR.gh, 'commitsSinceSha')
+      .resolves([
+        buildMockCommit('fix(automl): fixed a really bad bug'),
+        buildMockCommit('feat(asset): added a really cool feature'),
+        buildMockCommit('fix(pubsub): this commit should be ignored'),
+        buildMockCommit('fix(pubsub/pstest): this commit should be ignored'),
+        buildMockCommit('fix: this commit should be ignored'),
+        buildMockCommit(
+          'chore(all): auto-regenerate gapics (#1000)\n\nChanges:\n\nchore(automl): cleaned up a thing\n  PiperOrigin-RevId: 352834281\nfix(pubsublite): a minor issue\n  PiperOrigin-RevId: 352834283'
+        ),
+        buildMockCommit(
+          'chore(all): auto-regenerate gapics (#1001)\n\nCommit Body\n\nChanges:\n\nfix(automl): fixed a minor thing\n  PiperOrigin-RevId: 352834280\nfeat(language): added a new one\n  PiperOrigin-RevId: 352834282'
+        ),
+        buildMockCommit('fix(pubsublite): start generating v1'),
+      ]);
+
+    // See if there are any release PRs already open, we do this as
+    // we consider opening a new release-pr:
+    sandbox
+      .stub(releasePR.gh, 'findOpenReleasePRs')
+      .returns(Promise.resolve([]));
+
+    // Call to add autorelease: pending label:
+    const addLabelStub = sandbox
+      .stub(releasePR.gh, 'addLabels')
+      .withArgs(['autorelease: pending'], 22)
+      .resolves();
+
+    stubSuggesterWithSnapshot(sandbox, this.test!.fullTitle());
+    const pr = await releasePR.run();
+    assert.strictEqual(pr, 22);
+    expect(addLabelStub.callCount).to.eql(1);
   });
 });

@@ -12,24 +12,24 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import {ReleasePR, ReleaseCandidate} from '../release-pr';
-
-import {ConventionalCommits} from '../conventional-commits';
-import {GitHubTag} from '../github';
+import {BranchName} from '../util/branch-name';
+import {PullRequestTitle} from '../util/pull-request-title';
+import {GitHubFileContents, GitHubTag} from '../github';
+import {VersionsManifest} from '../updaters/java/versions-manifest';
 import {checkpoint, CheckpointType} from '../util/checkpoint';
-import {Update, VersionsMap} from '../updaters/update';
 import {Commit} from '../graphql-to-commits';
-
-// Generic
+import {ConventionalCommits} from '../conventional-commits';
+import {ReleaseCandidate} from '..';
+import {Version} from './java/version';
+import {VersionsMap, Update} from '../updaters/update';
+import {PackageName, ReleasePR} from '../release-pr';
 import {Changelog} from '../updaters/changelog';
-// Java
+import {Readme} from '../updaters/java/readme';
 import {GoogleUtils} from '../updaters/java/google-utils';
 import {PomXML} from '../updaters/java/pom-xml';
-import {VersionsManifest} from '../updaters/java/versions-manifest';
-import {Readme} from '../updaters/java/readme';
-import {Version} from './java/version';
-import {fromSemverReleaseType} from './java/bump_type';
 import {JavaUpdate} from '../updaters/java/java_update';
+import {isStableArtifact} from './java/stability';
+import {fromSemverReleaseType} from './java/bump_type';
 
 const CHANGELOG_SECTIONS = [
   {type: 'feat', section: 'Features'},
@@ -47,12 +47,19 @@ const CHANGELOG_SECTIONS = [
 ];
 
 export class JavaYoshi extends ReleasePR {
-  static releaserName = 'java-yoshi';
-  protected async _run() {
-    const versionsManifestContent = await this.gh.getFileContents(
-      'versions.txt'
-    );
-    console.info('version.txt content', versionsManifestContent.parsedContent);
+  private versionsManifestContent?: GitHubFileContents;
+
+  protected async getVersionManifestContent(): Promise<GitHubFileContents> {
+    if (!this.versionsManifestContent) {
+      this.versionsManifestContent = await this.gh.getFileContents(
+        'versions.txt'
+      );
+    }
+    return this.versionsManifestContent;
+  }
+
+  protected async _run(): Promise<number | undefined> {
+    const versionsManifestContent = await this.getVersionManifestContent();
     const currentVersions = VersionsManifest.parseVersions(
       versionsManifestContent.parsedContent
     );
@@ -69,14 +76,14 @@ export class JavaYoshi extends ReleasePR {
         'release asked for a snapshot, but no snapshot is needed',
         CheckpointType.Failure
       );
-      return;
+      return undefined;
     }
 
     if (this.snapshot) {
       this.labels = ['type: process'];
     }
 
-    const latestTag: GitHubTag | undefined = await this.gh.latestTag();
+    const latestTag: GitHubTag | undefined = await this.latestTag();
     const commits: Commit[] = this.snapshot
       ? [
           {
@@ -96,7 +103,7 @@ export class JavaYoshi extends ReleasePR {
         }`,
         CheckpointType.Failure
       );
-      return;
+      return undefined;
     }
     let prSHA = commits[0].sha;
     // Snapshots populate a fake "fix:"" commit, so that they will always
@@ -115,7 +122,8 @@ export class JavaYoshi extends ReleasePR {
 
     const cc = new ConventionalCommits({
       commits,
-      githubRepoUrl: this.repoUrl,
+      owner: this.gh.owner,
+      repository: this.gh.repo,
       bumpMinorPreMajor: this.bumpMinorPreMajor,
       changelogSections: CHANGELOG_SECTIONS,
     });
@@ -123,22 +131,13 @@ export class JavaYoshi extends ReleasePR {
       cc,
       latestTag
     );
-    const candidateVersions = await this.coerceVersions(cc, currentVersions);
-    let changelogEntry: string = await cc.generateChangelogEntry({
-      version: candidate.version,
-      currentTag: `v${candidate.version}`,
-      previousTag: candidate.previousTag,
-    });
-
-    // snapshot entries are special:
-    // 1. they don't update the README or CHANGELOG.
-    // 2. they always update a patch with the -SNAPSHOT suffix.
-    // 3. they're haunted.
-    if (this.snapshot) {
-      candidate.version = `${candidate.version}-SNAPSHOT`;
-      changelogEntry =
-        '### Updating meta-information for bleeding-edge SNAPSHOT release.';
-    }
+    const candidateVersions = await this.coerceVersions(
+      cc,
+      candidate,
+      latestTag,
+      currentVersions
+    );
+    const changelogEntry = await this.generateChangelog(cc, candidate);
 
     // don't create a release candidate until user facing changes
     // (fix, feat, BREAKING CHANGE) have been made; a CHANGELOG that's
@@ -150,19 +149,75 @@ export class JavaYoshi extends ReleasePR {
         }`,
         CheckpointType.Failure
       );
-      return;
+      return undefined;
     }
 
-    const updates: Update[] = [];
+    const packageName = await this.getPackageName();
+    const updates = await this.buildUpdates(
+      changelogEntry,
+      candidateVersions,
+      candidate,
+      packageName
+    );
 
+    return await this.openPR({
+      sha: prSHA!,
+      changelogEntry: `${changelogEntry}\n---\n`,
+      updates,
+      version: candidate.version,
+      includePackageName: this.monorepoTags,
+    });
+  }
+
+  protected async generateChangelog(
+    cc: ConventionalCommits,
+    candidate: ReleaseCandidate
+  ): Promise<string> {
+    if (this.snapshot) {
+      return '### Updating meta-information for bleeding-edge SNAPSHOT release.';
+    }
+    return await cc.generateChangelogEntry({
+      version: candidate.version,
+      currentTag: `v${candidate.version}`,
+      previousTag: candidate.previousTag,
+    });
+  }
+
+  protected async coerceReleaseCandidate(
+    cc: ConventionalCommits,
+    latestTag: GitHubTag | undefined,
+    preRelease = false
+  ): Promise<ReleaseCandidate> {
+    if (this.snapshot) {
+      const version = Version.parse(
+        latestTag?.version ?? this.defaultInitialVersion()
+      )
+        .bump('snapshot')
+        .toString();
+      return {
+        previousTag: latestTag?.version,
+        version,
+      };
+    }
+
+    return await super.coerceReleaseCandidate(cc, latestTag, preRelease);
+  }
+
+  protected async buildUpdates(
+    changelogEntry: string,
+    candidateVersions: VersionsMap,
+    candidate: ReleaseCandidate,
+    packageName: PackageName
+  ): Promise<Update[]> {
+    const updates: Update[] = [];
     if (!this.snapshot) {
       updates.push(
         new Changelog({
-          path: 'CHANGELOG.md',
+          path: this.changelogPath,
           changelogEntry,
           versions: candidateVersions,
           version: candidate.version,
-          packageName: this.packageName,
+          packageName: packageName.name,
         })
       );
 
@@ -172,7 +227,7 @@ export class JavaYoshi extends ReleasePR {
           changelogEntry,
           versions: candidateVersions,
           version: candidate.version,
-          packageName: this.packageName,
+          packageName: packageName.name,
         })
       );
 
@@ -184,8 +239,7 @@ export class JavaYoshi extends ReleasePR {
           changelogEntry,
           versions: candidateVersions,
           version: candidate.version,
-          packageName: this.packageName,
-          contents: versionsManifestContent,
+          packageName: packageName.name,
         })
       );
     }
@@ -196,8 +250,8 @@ export class JavaYoshi extends ReleasePR {
         changelogEntry,
         versions: candidateVersions,
         version: candidate.version,
-        packageName: this.packageName,
-        contents: versionsManifestContent,
+        packageName: packageName.name,
+        contents: await this.getVersionManifestContent(),
       })
     );
 
@@ -215,7 +269,7 @@ export class JavaYoshi extends ReleasePR {
           changelogEntry,
           versions: candidateVersions,
           version: candidate.version,
-          packageName: this.packageName,
+          packageName: packageName.name,
         })
       );
     });
@@ -228,7 +282,7 @@ export class JavaYoshi extends ReleasePR {
           changelogEntry,
           versions: candidateVersions,
           version: candidate.version,
-          packageName: this.packageName,
+          packageName: packageName.name,
         })
       );
     });
@@ -241,46 +295,84 @@ export class JavaYoshi extends ReleasePR {
           changelogEntry,
           versions: candidateVersions,
           version: candidate.version,
-          packageName: this.packageName,
+          packageName: packageName.name,
         })
       );
     });
-
-    console.info(
-      `attempting to open PR latestTagSha = ${
-        latestTag ? latestTag.sha : 'none'
-      } prSha = ${prSHA}`
-    );
-    await this.openPR({
-      sha: prSHA!,
-      changelogEntry: `${changelogEntry}\n---\n`,
-      updates,
-      version: candidate.version,
-      includePackageName: this.monorepoTags,
-    });
+    return updates;
   }
 
   protected supportsSnapshots(): boolean {
     return true;
   }
 
-  protected defaultInitialVersion(): string {
+  defaultInitialVersion(): string {
     return '0.1.0';
   }
 
   protected async coerceVersions(
     cc: ConventionalCommits,
+    candidate: ReleaseCandidate,
+    _latestTag: GitHubTag | undefined,
     currentVersions: VersionsMap
   ): Promise<VersionsMap> {
     const newVersions: VersionsMap = new Map<string, string>();
     for (const [k, version] of currentVersions) {
-      const bump = await cc.suggestBump(version);
-      const newVersion = Version.parse(version);
-      newVersion.bump(
-        this.snapshot ? 'snapshot' : fromSemverReleaseType(bump.releaseType)
-      );
-      newVersions.set(k, newVersion.toString());
+      if (candidate.version === '1.0.0' && isStableArtifact(k)) {
+        newVersions.set(k, '1.0.0');
+      } else {
+        const bump = await cc.suggestBump(version);
+        const newVersion = Version.parse(version);
+        newVersion.bump(
+          this.snapshot ? 'snapshot' : fromSemverReleaseType(bump.releaseType)
+        );
+        newVersions.set(k, newVersion.toString());
+      }
     }
     return newVersions;
+  }
+  // Begin release configuration
+
+  // Override this method to use static branch names
+  // If you modify this, you must ensure that the releaser can parse the tag version
+  // from the pull request.
+  protected async buildBranchName(
+    _version: string,
+    includePackageName: boolean
+  ): Promise<BranchName> {
+    const defaultBranch = await this.gh.getDefaultBranch();
+    const packageName = await this.getPackageName();
+    if (includePackageName && packageName.getComponent()) {
+      return BranchName.ofComponentTargetBranch(
+        packageName.getComponent(),
+        defaultBranch
+      );
+    }
+    return BranchName.ofTargetBranch(defaultBranch);
+  }
+
+  // Override this method to modify the pull request title
+  protected async buildPullRequestTitle(
+    version: string,
+    includePackageName: boolean
+  ): Promise<string> {
+    const defaultBranch = await this.gh.getDefaultBranch();
+    const repoDefaultBranch = await this.gh.getRepositoryDefaultBranch();
+
+    // If we are proposing a release to a non-default branch, add the target
+    // branch in the pull request title.
+    // TODO: consider pushing this change up to the default pull request title
+    if (repoDefaultBranch === defaultBranch) {
+      return super.buildPullRequestTitle(version, includePackageName);
+    }
+    const packageName = await this.getPackageName();
+    const pullRequestTitle = includePackageName
+      ? PullRequestTitle.ofComponentTargetBranchVersion(
+          packageName.name,
+          defaultBranch,
+          version
+        )
+      : PullRequestTitle.ofTargetBranchVersion(defaultBranch, version);
+    return pullRequestTitle.toString();
   }
 }

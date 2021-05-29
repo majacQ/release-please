@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import {ReleasePR, ReleaseCandidate} from '../release-pr';
+import {ReleasePR, ReleaseCandidate, OpenPROptions} from '../release-pr';
 
 import {ConventionalCommits} from '../conventional-commits';
 import {GitHubTag} from '../github';
@@ -25,6 +25,7 @@ import {Changelog} from '../updaters/changelog';
 // Python specific.
 import {SetupPy} from '../updaters/python/setup-py';
 import {SetupCfg} from '../updaters/python/setup-cfg';
+import {VersionPy} from '../updaters/python/version-py';
 
 const CHANGELOG_SECTIONS = [
   {type: 'feat', section: 'Features'},
@@ -42,21 +43,17 @@ const CHANGELOG_SECTIONS = [
 ];
 
 export class Python extends ReleasePR {
-  static releaserName = 'python';
-  protected async _run() {
-    const latestTag: GitHubTag | undefined = await this.gh.latestTag(
-      this.monorepoTags ? `${this.packageName}-` : undefined
-    );
-    const commits: Commit[] = await this.commits({
-      sha: latestTag ? latestTag.sha : undefined,
-      path: this.path,
-    });
-
+  protected async _getOpenPROptions(
+    commits: Commit[],
+    latestTag?: GitHubTag
+  ): Promise<OpenPROptions | undefined> {
     const cc = new ConventionalCommits({
       commits,
-      githubRepoUrl: this.repoUrl,
+      owner: this.gh.owner,
+      repository: this.gh.repo,
       bumpMinorPreMajor: this.bumpMinorPreMajor,
-      changelogSections: CHANGELOG_SECTIONS,
+      bumpPatchForMinorPreMajor: this.bumpPatchForMinorPreMajor,
+      changelogSections: this.changelogSections || CHANGELOG_SECTIONS,
     });
     const candidate: ReleaseCandidate = await this.coerceReleaseCandidate(
       cc,
@@ -65,8 +62,10 @@ export class Python extends ReleasePR {
 
     const changelogEntry: string = await cc.generateChangelogEntry({
       version: candidate.version,
-      currentTag: `v${candidate.version}`,
-      previousTag: candidate.previousTag,
+      currentTag: await this.normalizeTagName(candidate.version),
+      previousTag: candidate.previousTag
+        ? await this.normalizeTagName(candidate.previousTag)
+        : undefined,
     });
 
     // don't create a release candidate until user facing changes
@@ -79,17 +78,18 @@ export class Python extends ReleasePR {
         }`,
         CheckpointType.Failure
       );
-      return;
+      return undefined;
     }
 
     const updates: Update[] = [];
 
+    const packageName = await this.getPackageName();
     updates.push(
       new Changelog({
-        path: this.addPath('CHANGELOG.md'),
+        path: this.addPath(this.changelogPath),
         changelogEntry,
         version: candidate.version,
-        packageName: this.packageName,
+        packageName: packageName.name,
       })
     );
 
@@ -98,7 +98,7 @@ export class Python extends ReleasePR {
         path: this.addPath('setup.cfg'),
         changelogEntry,
         version: candidate.version,
-        packageName: this.packageName,
+        packageName: packageName.name,
       })
     );
     updates.push(
@@ -106,20 +106,49 @@ export class Python extends ReleasePR {
         path: this.addPath('setup.py'),
         changelogEntry,
         version: candidate.version,
-        packageName: this.packageName,
+        packageName: packageName.name,
       })
     );
 
-    await this.openPR({
+    // There should be only one version.py, but foreach in case that is incorrect
+    const versionPyFilesSearch = this.gh.findFilesByFilename(
+      'version.py',
+      this.path
+    );
+    const versionPyFiles = await versionPyFilesSearch;
+    versionPyFiles.forEach(path => {
+      updates.push(
+        new VersionPy({
+          path: this.addPath(path),
+          changelogEntry,
+          version: candidate.version,
+          packageName: packageName.name,
+        })
+      );
+    });
+    return {
       sha: commits[0].sha!,
       changelogEntry: `${changelogEntry}\n---\n`,
       updates,
       version: candidate.version,
       includePackageName: this.monorepoTags,
-    });
+    };
   }
 
-  protected defaultInitialVersion(): string {
+  protected async _run(): Promise<number | undefined> {
+    const packageName = await this.getPackageName();
+    const latestTag: GitHubTag | undefined = await this.latestTag(
+      this.monorepoTags ? `${packageName.getComponent()}-` : undefined
+    );
+    const commits: Commit[] = await this.commits({
+      sha: latestTag ? latestTag.sha : undefined,
+      path: this.path,
+    });
+    const openPROptions = await this.getOpenPROptions(commits, latestTag);
+    return openPROptions ? await this.openPR(openPROptions) : undefined;
+  }
+
+  defaultInitialVersion(): string {
     return '0.1.0';
   }
 }
